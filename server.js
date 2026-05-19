@@ -1254,7 +1254,6 @@ async function issueProfileSetupInvite(req, userId, email, name) {
     emailDispatch,
   };
 }
-
 function buildPasswordResetEmailHtml(resetRequest, user) {
   const userName = String(user?.name || "Team Member").trim() || "Team Member";
   const resetLink = String(resetRequest?.resetLink || "").trim();
