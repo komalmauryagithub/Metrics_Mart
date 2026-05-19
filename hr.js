@@ -2649,5 +2649,4 @@ async function handleHrProfileSetupInvite(profileSetup) {
     emailSent,
   };
 }
-
 window.logout = logout;
