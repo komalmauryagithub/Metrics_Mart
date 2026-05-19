@@ -1,0 +1,5 @@
+@import url("./dev.css");
+
+body .brand-panel.cyan {
+  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 52%, #22d3ee 100%);
+}

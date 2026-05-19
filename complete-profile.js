@@ -1,0 +1,372 @@
+const PROFILE_FORM_MAX_FILE_SIZE = 15 * 1024 * 1024;
+const PROFILE_FORM_ALLOWED_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".heif",
+  ".pdf",
+  ".doc",
+  ".docx",
+]);
+const PROFILE_BASE_URL =
+  window.location.protocol === "file:" ||
+  ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? "http://localhost:3000"
+    : window.location.origin || "https://metrics-mart.onrender.com";
+const profileToken = new URLSearchParams(window.location.search).get("token") || "";
+const profileForm = document.getElementById("completeProfileForm");
+const pfEnabledField = document.getElementById("pf_enabled");
+const pfDetails = document.getElementById("pfDetails");
+const submitBtn = document.getElementById("submitBtn");
+const formMessage = document.getElementById("formMessage");
+const statusBanner = document.getElementById("statusBanner");
+const statusBadge = document.getElementById("statusBadge");
+
+if (window.location.protocol === "file:") {
+  const nextUrl = `${PROFILE_BASE_URL}/complete-profile.html${profileToken ? `?token=${encodeURIComponent(profileToken)}` : ""}`;
+  window.location.replace(nextUrl);
+}
+
+function setStatusBadge(status) {
+  const normalized = String(status || "pending").toLowerCase();
+  const labelMap = {
+    pending: "Link Active",
+    completed: "Completed",
+    expired: "Expired",
+    not_sent: "Pending",
+  };
+
+  statusBadge.textContent = labelMap[normalized] || "Pending";
+}
+
+function setBanner(message, type = "error") {
+  if (!message) {
+    statusBanner.textContent = "";
+    statusBanner.className = "status-banner hidden";
+    return;
+  }
+
+  statusBanner.textContent = message;
+  statusBanner.className = `status-banner ${type}`;
+}
+
+function setFormMessage(message, type = "error") {
+  if (!message) {
+    formMessage.textContent = "";
+    formMessage.className = "form-message hidden";
+    return;
+  }
+
+  formMessage.textContent = message;
+  formMessage.className = `form-message ${type}`;
+}
+
+function setSubmittingState(isSubmitting) {
+  submitBtn.disabled = isSubmitting;
+  submitBtn.textContent = isSubmitting ? "Submitting..." : "Submit Details";
+}
+
+function setSummaryValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = String(value || "-");
+  }
+}
+
+function setFieldValue(fieldName, value = "") {
+  if (!profileForm?.elements?.[fieldName]) return;
+  profileForm.elements[fieldName].value = value ?? "";
+}
+
+function setFieldHint(id, text = "") {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = text;
+  }
+}
+
+function getFileExtension(fileName) {
+  const normalized = String(fileName || "").trim().toLowerCase();
+  const lastDotIndex = normalized.lastIndexOf(".");
+  return lastDotIndex >= 0 ? normalized.slice(lastDotIndex) : "";
+}
+
+function getFileInputLabel(input) {
+  return (
+    input?.closest(".input-group")?.querySelector("label")?.textContent?.replace(/\*/g, "").trim() ||
+    input?.name ||
+    "File"
+  );
+}
+
+function validateProfileFormFiles(form) {
+  const fileFields = [
+    "prof_img",
+    "aadhar_img",
+    "pan_img",
+    "cancelled_cheque",
+    "resume_file",
+    "experience_file",
+    "certification_file",
+  ];
+
+  for (const fieldName of fileFields) {
+    const input = form?.elements?.[fieldName];
+    const file = input?.files?.[0];
+    if (!file) continue;
+
+    if (file.size > PROFILE_FORM_MAX_FILE_SIZE) {
+      return `${getFileInputLabel(input)} must be 15 MB or smaller.`;
+    }
+
+    const extension = getFileExtension(file.name);
+    if (extension && !PROFILE_FORM_ALLOWED_EXTENSIONS.has(extension)) {
+      return `${getFileInputLabel(input)} must be JPG, PNG, WEBP, HEIC, PDF, DOC or DOCX.`;
+    }
+  }
+
+  return "";
+}
+
+function normalizeSkillValue(value) {
+  const normalizedKey = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+
+  switch (normalizedKey) {
+    case "web":
+      return "web";
+    case "seo":
+      return "seo";
+    case "smo":
+      return "smo";
+    case "ads":
+      return "ads";
+    case "app":
+      return "app";
+    case "erp":
+    case "crm":
+    case "erpcrm":
+      return "erp_crm";
+    default:
+      return "";
+  }
+}
+
+function parseProfileSkills(value) {
+  let parsed = value;
+
+  while (typeof parsed === "string") {
+    const trimmed = parsed.trim();
+    if (!trimmed) return [];
+
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (_err) {
+      parsed = trimmed;
+      break;
+    }
+  }
+
+  const sourceValues = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  return [...new Set(sourceValues.map(normalizeSkillValue).filter(Boolean))];
+}
+
+function togglePfFields() {
+  const isEnabled = profileForm?.elements?.pf_enabled?.value === "1";
+  pfDetails.classList.toggle("hidden", !isEnabled);
+
+  ["pf_number", "uan_number", "employee_pf_amount", "employer_pf_amount", "pf_joining_date"].forEach(
+    (fieldName) => {
+      if (!profileForm?.elements?.[fieldName]) return;
+      profileForm.elements[fieldName].required = isEnabled;
+    },
+  );
+}
+
+function populateSummary(user) {
+  setSummaryValue("summaryName", user.name);
+  setSummaryValue("summaryEmail", user.email);
+  setSummaryValue("summaryContact", user.contact);
+  setSummaryValue("summaryRole", user.role ? String(user.role).toUpperCase() : "-");
+  setSummaryValue("summaryCompany", user.comp_name);
+  setStatusBadge(user.profile_setup_status);
+}
+
+function populateForm(user) {
+  setFieldValue("aadhar_no", user.aadhar_no || "");
+  setFieldValue("pan_number", user.pan_number || "");
+  setFieldValue("bank_name", user.bank_name || "");
+  setFieldValue("account_no", user.account_no || "");
+  setFieldValue("ifsc_code", user.ifsc_code || "");
+  setFieldValue("beneficiary_name", user.beneficiary_name || "");
+  setFieldValue("joining_date", user.joining_date || "");
+  setFieldValue("total_experience", user.total_experience || "");
+  setFieldValue("pf_enabled", Number(user.pf_enabled || 0) ? "1" : "0");
+  setFieldValue("pf_number", user.pf_number || "");
+  setFieldValue("uan_number", user.uan_number || "");
+  setFieldValue("employee_pf_amount", user.employee_pf_amount ?? "");
+  setFieldValue("employer_pf_amount", user.employer_pf_amount ?? "");
+  setFieldValue("pf_joining_date", user.pf_joining_date || "");
+
+  const selectedSkills = new Set(parseProfileSkills(user.skills));
+  document
+    .querySelectorAll('input[name="skills[]"]')
+    .forEach((checkbox) => {
+      checkbox.checked = selectedSkills.has(String(checkbox.value || ""));
+    });
+
+  setFieldHint(
+    "profImgHint",
+    user.prof_img ? "Profile image already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "aadharImgHint",
+    user.aadhar_img ? "Aadhar image already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "panImgHint",
+    user.pan_img ? "PAN image already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "cancelledChequeHint",
+    user.cancelled_cheque ? "Cancelled check already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "resumeFileHint",
+    user.resume_file ? "Resume already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "experienceFileHint",
+    user.experience_file ? "Experience letter already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "certificationFileHint",
+    user.certification_file ? "Certification file already saved. Upload only if you want to replace it." : "",
+  );
+
+  togglePfFields();
+}
+
+function disableForm(message, type = "error") {
+  profileForm.classList.add("hidden");
+  setBanner(message, type);
+}
+
+async function parseJsonResponse(response) {
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text);
+  } catch (_err) {
+    return {
+      success: false,
+      message: "Invalid response from server",
+    };
+  }
+}
+
+async function loadProfileForm() {
+  if (!profileToken) {
+    setStatusBadge("expired");
+    disableForm("This profile form link is missing. Please ask admin for a fresh link.");
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${PROFILE_BASE_URL}/api/profile-setup/${encodeURIComponent(profileToken)}`,
+      {
+        cache: "no-store",
+      },
+    );
+    const result = await parseJsonResponse(response);
+
+    if (!response.ok || !result.success || !result.data) {
+      setStatusBadge(response.status === 410 ? "expired" : "pending");
+      disableForm(
+        result.message || "Unable to load your profile form right now.",
+        response.status === 410 ? "error" : "error",
+      );
+      return;
+    }
+
+    populateSummary(result.data);
+    populateForm(result.data);
+    setBanner("Fill the remaining details below and submit once you are done.", "success");
+  } catch (err) {
+    console.error("Profile form load failed:", err);
+    setStatusBadge("expired");
+    disableForm("Unable to load your profile form right now. Please try again later.");
+  }
+}
+
+async function handleProfileSubmit(event) {
+  event.preventDefault();
+  setFormMessage("");
+
+  const fileValidationMessage = validateProfileFormFiles(profileForm);
+  if (fileValidationMessage) {
+    setFormMessage(fileValidationMessage, "error");
+    return;
+  }
+
+  const formData = new FormData(profileForm);
+  if (!String(formData.get("aadhar_no") || "").trim()) {
+    setFormMessage("Aadhar number is required.", "error");
+    return;
+  }
+
+  setSubmittingState(true);
+
+  try {
+    const response = await fetch(
+      `${PROFILE_BASE_URL}/api/profile-setup/${encodeURIComponent(profileToken)}`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+    const result = await parseJsonResponse(response);
+
+    if (!response.ok || !result.success) {
+      setFormMessage(
+        result.message || `Request failed (${response.status})`,
+        "error",
+      );
+      return;
+    }
+
+    setStatusBadge("completed");
+    setBanner(
+      result.message || "Profile details submitted successfully.",
+      "success",
+    );
+    setFormMessage("");
+    profileForm.classList.add("hidden");
+  } catch (err) {
+    console.error("Profile form submit failed:", err);
+    setFormMessage("Server error while submitting your profile.", "error");
+  } finally {
+    setSubmittingState(false);
+  }
+}
+
+if (pfEnabledField) {
+  pfEnabledField.addEventListener("change", togglePfFields);
+}
+
+if (profileForm?.elements?.ifsc_code) {
+  profileForm.elements.ifsc_code.addEventListener("input", (event) => {
+    event.target.value = String(event.target.value || "").toUpperCase();
+  });
+}
+
+if (profileForm) {
+  profileForm.addEventListener("submit", handleProfileSubmit);
+}
+
+loadProfileForm();
