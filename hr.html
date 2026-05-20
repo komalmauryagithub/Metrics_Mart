@@ -245,6 +245,7 @@
                       <th>Status</th>
                       <th>Manager</th>
                       <th>Docs</th>
+                      <th>Profile</th>
                     </tr>
                   </thead>
                   <tbody id="employeeDirectoryBody"></tbody>
@@ -748,6 +749,36 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div
+      id="hrEmployeeProfileModal"
+      class="employee-profile-modal hidden"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hrEmployeeProfileTitle"
+    >
+      <div class="employee-profile-modal-dialog">
+        <div class="employee-profile-modal-head">
+          <div>
+            <span class="section-kicker">Employee Record</span>
+            <h2 id="hrEmployeeProfileTitle">Employee Profile</h2>
+            <p>Admin-created account details and submitted onboarding data.</p>
+          </div>
+          <button
+            type="button"
+            class="user-modal-close"
+            id="hrEmployeeProfileCloseBtn"
+            aria-label="Close employee profile"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div id="hrEmployeeProfileBody" class="employee-profile-modal-body">
+          <div class="profile-record-empty">Select an employee to view profile details.</div>
+        </div>
+      </div>
     </div>
 
     <div
