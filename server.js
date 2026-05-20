@@ -3837,7 +3837,6 @@ function serializeLeaveBalanceSnapshot(snapshot) {
     paidLeaveDaysUsed: formatBalanceValue(snapshot.paidLeaveDaysUsed),
     unpaidEligibleDays: formatBalanceValue(snapshot.unpaidEligibleDays),
     availableBalance: formatBalanceValue(snapshot.availableBalance),
-    carryForwardBalance: formatBalanceValue(snapshot.carryForwardBalance),
     currentMonthCredit: formatBalanceValue(snapshot.currentMonthCredit),
     currentMonthPaidLeavesUsed: formatBalanceValue(snapshot.currentMonthPaidLeavesUsed),
     currentMonthUnusedCredit: formatBalanceValue(snapshot.currentMonthUnusedCredit),
@@ -3864,7 +3863,6 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
       paidLeaveDaysUsed: 0,
       unpaidEligibleDays: 0,
       availableBalance: 0,
-      carryForwardBalance: 0,
       currentMonthCredit: 0,
       currentMonthPaidLeavesUsed: 0,
       currentMonthUnusedCredit: 0,
@@ -3913,12 +3911,11 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
     if (!monthBreakdownMap.has(monthKey)) {
       monthBreakdownMap.set(monthKey, {
         monthKey,
-        carryForwardAtStart: availableBalance,
         monthlyCredit: 0,
         paidLeaveDaysUsed: 0,
         unpaidEligibleDays: 0,
         alwaysPaidDays: 0,
-        availableBalance,
+        availableBalance: 0,
       });
     }
 
@@ -3932,10 +3929,9 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
 
     while (monthCursor && monthCursor.localeCompare(targetMonthKey) <= 0) {
       const monthEntry = getMonthEntry(monthCursor);
-      monthEntry.carryForwardAtStart = availableBalance;
       monthEntry.monthlyCredit += LEAVE_MONTHLY_CREDIT;
 
-      availableBalance += LEAVE_MONTHLY_CREDIT;
+      availableBalance = Number(monthEntry.monthlyCredit || 0);
       totalAccruedLeaves += LEAVE_MONTHLY_CREDIT;
       monthEntry.availableBalance = availableBalance;
 
@@ -4037,7 +4033,6 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
 
   const currentMonthEntry = monthBreakdownMap.get(referenceMonthKey) || {
     monthKey: referenceMonthKey,
-    carryForwardAtStart: 0,
     monthlyCredit: 0,
     paidLeaveDaysUsed: 0,
     unpaidEligibleDays: 0,
@@ -4049,11 +4044,6 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
   const currentMonthUnusedCredit = Math.max(
     0,
     currentMonthCredit - currentMonthPaidLeavesUsed,
-  );
-  const carryForwardBalance = Math.max(
-    0,
-    Number(currentMonthEntry.carryForwardAtStart || 0) -
-      Math.max(0, currentMonthPaidLeavesUsed - currentMonthCredit),
   );
 
   return {
@@ -4070,7 +4060,6 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
     paidLeaveDaysUsed,
     unpaidEligibleDays,
     availableBalance,
-    carryForwardBalance,
     currentMonthCredit,
     currentMonthPaidLeavesUsed,
     currentMonthUnusedCredit,
@@ -10396,7 +10385,6 @@ app.get("/api/admin/leaves", async (req, res) => {
       return {
         ...serializedRow,
         leave_balance: Number(userBalance?.availableBalance || 0),
-        leave_carry_forward: Number(userBalance?.carryForwardBalance || 0),
         leave_monthly_credit: Number(userBalance?.currentMonthCredit || 0),
       };
     });
@@ -10537,7 +10525,6 @@ app.get("/api/hr/leaves", async (req, res) => {
       return {
         ...serializedRow,
         leave_balance: Number(userBalance?.availableBalance || 0),
-        leave_carry_forward: Number(userBalance?.carryForwardBalance || 0),
         leave_monthly_credit: Number(userBalance?.currentMonthCredit || 0),
       };
     });
