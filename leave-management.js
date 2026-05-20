@@ -373,14 +373,6 @@
               <small id="myLeaveAvailableBalanceHint">Current approved leave balance</small>
             </div>
           </div>
-          <div class="leave-summary-card carry">
-            <div class="leave-summary-icon"><i class="fas fa-layer-group"></i></div>
-            <div class="leave-summary-copy">
-              <span>Carry Forward</span>
-              <strong id="myLeaveCarryForward">0</strong>
-              <small id="myLeaveCarryForwardHint">Rolled from previous months</small>
-            </div>
-          </div>
           <div class="leave-summary-card credit">
             <div class="leave-summary-icon"><i class="fas fa-calendar-plus"></i></div>
             <div class="leave-summary-copy">
@@ -575,25 +567,17 @@
               <small id="adminLeaveAvailableBalanceHint">Current paid leave balance across team</small>
             </div>
           </div>
-          <div class="leave-summary-card carry">
-            <div class="leave-summary-icon"><i class="fas fa-people-arrows"></i></div>
-            <div class="leave-summary-copy">
-              <span>Carry Forward Users</span>
-              <strong id="adminLeaveCarryForwardUsers">0</strong>
-              <small id="adminLeaveCarryForwardUsersHint">Employees with carried paid leaves</small>
-            </div>
-          </div>
         </div>
 
         <div class="leave-table-card leave-balance-card">
           <div class="leave-table-toolbar">
             <div>
               <h3>Employee Leave Balances</h3>
-              <p id="adminLeaveBalanceMeta">Track each employee's current paid leave balance and carry forward.</p>
+              <p id="adminLeaveBalanceMeta">Track each employee's current paid leave balance.</p>
             </div>
             <div class="leave-chip-note leave-chip-note-soft">
               <i class="fas fa-calendar-plus"></i>
-              <span>1 paid leave is credited every month and carries forward if unused</span>
+              <span>1 paid leave is available for the current month</span>
             </div>
           </div>
 
@@ -604,14 +588,13 @@
                   <th>Employee</th>
                   <th>Role</th>
                   <th>Available</th>
-                  <th>Carry Forward</th>
                   <th>Monthly Credit</th>
                   <th>Paid Leaves Used</th>
                   <th>As Of</th>
                 </tr>
               </thead>
               <tbody id="adminLeaveBalanceBody">
-                <tr><td colspan="7" class="leave-empty-state">Loading leave balances...</td></tr>
+                <tr><td colspan="6" class="leave-empty-state">Loading leave balances...</td></tr>
               </tbody>
             </table>
           </div>
@@ -990,8 +973,6 @@
     const countChip = document.getElementById("myLeaveCountChip");
     const availableBalanceEl = document.getElementById("myLeaveAvailableBalance");
     const availableBalanceHintEl = document.getElementById("myLeaveAvailableBalanceHint");
-    const carryForwardEl = document.getElementById("myLeaveCarryForward");
-    const carryForwardHintEl = document.getElementById("myLeaveCarryForwardHint");
     const monthlyCreditEl = document.getElementById("myLeaveMonthlyCredit");
     const monthlyCreditHintEl = document.getElementById("myLeaveMonthlyCreditHint");
     const paidUsedEl = document.getElementById("myLeavePaidUsed");
@@ -1007,16 +988,6 @@
       availableBalanceHintEl.textContent = safeBalance.nextCreditDate
         ? `${monthLabel} balance | Next credit on ${formatDateDisplay(safeBalance.nextCreditDate)}`
         : `${monthLabel} balance available for approved paid leaves`;
-    }
-
-    if (carryForwardEl) {
-      carryForwardEl.textContent = formatBalanceValue(safeBalance.carryForwardBalance);
-    }
-
-    if (carryForwardHintEl) {
-      carryForwardHintEl.textContent = Number(safeBalance.carryForwardBalance || 0) > 0
-        ? `Unused paid leaves carried into ${monthLabel}`
-        : `No unused leaves were carried into ${monthLabel}`;
     }
 
     if (monthlyCreditEl) {
@@ -1038,7 +1009,7 @@
     if (countChip) {
       countChip.innerHTML = `
         <i class="fas fa-layer-group"></i>
-        <span>${Number(summary.totalRequests || 0)} request${Number(summary.totalRequests || 0) === 1 ? "" : "s"} | Pending ${Number(summary.pendingRequests || 0)} | Available ${formatBalanceValue(safeBalance.availableBalance)} | Carry ${formatBalanceValue(safeBalance.carryForwardBalance)}</span>
+        <span>${Number(summary.totalRequests || 0)} request${Number(summary.totalRequests || 0) === 1 ? "" : "s"} | Pending ${Number(summary.pendingRequests || 0)} | Available ${formatBalanceValue(safeBalance.availableBalance)}</span>
       `;
     }
 
@@ -1499,7 +1470,7 @@
     tableBody.innerHTML = `<tr><td colspan="12" class="leave-empty-state">Loading leave dashboard...</td></tr>`;
     const balanceBody = document.getElementById("adminLeaveBalanceBody");
     if (balanceBody) {
-      balanceBody.innerHTML = `<tr><td colspan="7" class="leave-empty-state">Loading leave balances...</td></tr>`;
+      balanceBody.innerHTML = `<tr><td colspan="6" class="leave-empty-state">Loading leave balances...</td></tr>`;
     }
 
     try {
@@ -1537,7 +1508,7 @@
     } catch (error) {
       tableBody.innerHTML = `<tr><td colspan="12" class="leave-empty-state">${escapeHtml(error.message || "Failed to load leave dashboard")}</td></tr>`;
       if (balanceBody) {
-        balanceBody.innerHTML = `<tr><td colspan="7" class="leave-empty-state">${escapeHtml(error.message || "Failed to load leave balances")}</td></tr>`;
+        balanceBody.innerHTML = `<tr><td colspan="6" class="leave-empty-state">${escapeHtml(error.message || "Failed to load leave balances")}</td></tr>`;
       }
     }
   }
@@ -1573,13 +1544,8 @@
     const totalAvailableBalance = visibleBalances.reduce(function sumBalances(total, row) {
       return total + Number(row.availableBalance || 0);
     }, 0);
-    const carryForwardUsers = visibleBalances.filter(function hasCarryForward(row) {
-      return Number(row.carryForwardBalance || 0) > 0;
-    }).length;
     const availableBalanceEl = document.getElementById("adminLeaveAvailableBalance");
     const availableBalanceHintEl = document.getElementById("adminLeaveAvailableBalanceHint");
-    const carryForwardUsersEl = document.getElementById("adminLeaveCarryForwardUsers");
-    const carryForwardUsersHintEl = document.getElementById("adminLeaveCarryForwardUsersHint");
 
     if (availableBalanceEl) {
       availableBalanceEl.textContent = formatBalanceValue(totalAvailableBalance);
@@ -1587,14 +1553,6 @@
 
     if (availableBalanceHintEl) {
       availableBalanceHintEl.textContent = `${visibleBalances.length} employee${visibleBalances.length === 1 ? "" : "s"} currently visible in balance table`;
-    }
-
-    if (carryForwardUsersEl) {
-      carryForwardUsersEl.textContent = String(carryForwardUsers);
-    }
-
-    if (carryForwardUsersHintEl) {
-      carryForwardUsersHintEl.textContent = `${carryForwardUsers} employee${carryForwardUsers === 1 ? "" : "s"} have unused paid leaves carried from previous months`;
     }
 
     const meta = document.getElementById("adminLeaveTableMeta");
@@ -1611,11 +1569,11 @@
     const meta = document.getElementById("adminLeaveBalanceMeta");
 
     if (meta) {
-      meta.textContent = `Showing ${visibleBalances.length} employee${visibleBalances.length === 1 ? "" : "s"} with live paid leave balance and carry forward.`;
+      meta.textContent = `Showing ${visibleBalances.length} employee${visibleBalances.length === 1 ? "" : "s"} with live paid leave balance.`;
     }
 
     if (!visibleBalances.length) {
-      tableBody.innerHTML = `<tr><td colspan="7" class="leave-empty-state">No employee leave balances match the current search or role filter.</td></tr>`;
+      tableBody.innerHTML = `<tr><td colspan="6" class="leave-empty-state">No employee leave balances match the current search or role filter.</td></tr>`;
       return;
     }
 
@@ -1631,7 +1589,6 @@
           </td>
           <td>${renderRoleBadge(row.role)}</td>
           <td><strong>${formatBalanceValue(row.availableBalance)}</strong></td>
-          <td>${formatBalanceValue(row.carryForwardBalance)}</td>
           <td>${formatBalanceValue(row.currentMonthCredit || row.monthlyCredit)}</td>
           <td>${formatBalanceValue(row.paidLeaveDaysUsed)}</td>
           <td>${escapeHtml(monthLabel)}${row.asOfDate ? `<br /><span class="leave-balance-date">${escapeHtml(formatDateDisplay(row.asOfDate))}</span>` : ""}</td>
@@ -1673,7 +1630,7 @@
           <td>
             <div class="leave-note-stack">
               <strong>${formatBalanceValue(row.leave_balance)}</strong>
-              <span>Carry ${formatBalanceValue(row.leave_carry_forward)} | Credit ${formatBalanceValue(row.leave_monthly_credit)}</span>
+              <span>Monthly credit ${formatBalanceValue(row.leave_monthly_credit)}</span>
             </div>
           </td>
           <td>${renderLeaveTypeBadge(row.leave_type)}</td>
