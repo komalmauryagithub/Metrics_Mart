@@ -821,10 +821,6 @@ function normalizeAppBaseUrl(value) {
 }
 
 function resolveAppBaseUrl(req) {
-  if (PUBLIC_APP_URL) {
-    return PUBLIC_APP_URL;
-  }
-
   const forwardedProto = String(
     req.headers["x-forwarded-proto"] || req.protocol || "http",
   )
@@ -835,12 +831,29 @@ function resolveAppBaseUrl(req) {
   )
     .split(",")[0]
     .trim();
+  const requestBaseUrl = normalizeAppBaseUrl(`${forwardedProto}://${forwardedHost}`);
+  const requestHost = requestBaseUrl
+    .replace(/^https?:\/\//, "")
+    .split("/")[0]
+    .split(":")[0];
 
-  return normalizeAppBaseUrl(`${forwardedProto}://${forwardedHost}`);
+  if (requestBaseUrl && !isLoopbackHostValue(requestHost)) {
+    return requestBaseUrl;
+  }
+
+  return PUBLIC_APP_URL || requestBaseUrl || BASE_URL;
+}
+
+function normalizeProfileSetupTokenValue(token) {
+  const tokenMatch = String(token || "").match(/[a-f0-9]{64}/i);
+  return tokenMatch ? tokenMatch[0].toLowerCase() : "";
 }
 
 function hashProfileSetupToken(token) {
-  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(normalizeProfileSetupTokenValue(token))
+    .digest("hex");
 }
 
 function generateProfileSetupTokenData() {
@@ -1194,7 +1207,11 @@ function buildProfileSetupInviteHtml(profileSetup, user) {
 }
 
 function buildProfileSetupInvitePayload(req, user, token, expiresAt) {
-  const invitationLink = `${resolveAppBaseUrl(req)}/complete-profile.html?token=${encodeURIComponent(token)}`;
+  const invitationParams = new URLSearchParams({ token: String(token || "") });
+  if (user?.id) {
+    invitationParams.set("uid", String(user.id));
+  }
+  const invitationLink = `${resolveAppBaseUrl(req)}/complete-profile.html?${invitationParams.toString()}`;
   const expiresOn = formatProfileSetupExpiryLabel(expiresAt);
   const subject = `Complete your Metrics Mart profile`;
   const bodyLines = [
@@ -5390,7 +5407,10 @@ app.post("/register", (req, res) => {
 });
 
 async function getProfileSetupUserByToken(token) {
-  const tokenHash = hashProfileSetupToken(token);
+  const normalizedToken = normalizeProfileSetupTokenValue(token);
+  if (!normalizedToken) return null;
+
+  const tokenHash = hashProfileSetupToken(normalizedToken);
   const [users] = await dbPromise.query(
     `
       SELECT
@@ -5522,7 +5542,7 @@ app.post("/api/admin/users/:id/profile-setup-link", async (req, res) => {
 });
 
 app.get("/api/profile-setup/:token", async (req, res) => {
-  const token = String(req.params.token || "").trim();
+  const token = normalizeProfileSetupTokenValue(req.params.token);
 
   if (!token) {
     return res.status(400).json({
@@ -5591,7 +5611,7 @@ app.post("/api/profile-setup/:token", (req, res) => {
       });
     }
 
-    const token = String(req.params.token || "").trim();
+    const token = normalizeProfileSetupTokenValue(req.params.token);
     if (!token) {
       return res.status(400).json({
         success: false,
