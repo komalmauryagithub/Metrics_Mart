@@ -7,7 +7,6 @@ let editingLeadId = null;
 let popupTimer = null;
 let attendanceUpdating = false;
 let attendanceCalendarVisible = false;
-let attendanceLocationRequestSubmitting = false;
 const MONTHLY_TARGET = 200000;
 let currentMonthlyTarget = MONTHLY_TARGET;
 let dealCloseLeadId = null;
@@ -46,19 +45,6 @@ const BASE_URL =
       ? "http://localhost:3000"
       : window.location.origin;
 
-const ATTENDANCE_GEOFENCE = {
-  latitude: 19.168507,
-  longitude: 72.842137,
-  radiusMeters: 50,
-  address:
-    "Riddhi Siddhi Complex, E-107, Swami Vivekananda Rd, opposite Patkar College, Unnat Nagar, Goregaon West, Mumbai, Maharashtra 400104",
-};
-let attendanceLocationRequestState = {
-  officeZone: { ...ATTENDANCE_GEOFENCE, type: "office", label: "Office" },
-  activeRequest: null,
-  activeZone: { ...ATTENDANCE_GEOFENCE, type: "office", label: "Office" },
-};
-
 function getEmptyTrackerCounts() {
   return {
     total: 0,
@@ -87,7 +73,6 @@ function filterTable(tableId, searchInputId) {
 
 window.onload = function () {
   loadUserFromLocalStorage();
-  setupAttendanceLocationRequestModal();
   fetchUserDataFromDB();
   loadTmeDashboard();
   loadLeads();
@@ -1843,21 +1828,9 @@ async function loadAttendance() {
   if (!tbody) return;
 
   try {
-    const [attendanceRes, requestRes] = await Promise.all([
-      fetch(`${BASE_URL}/api/attendance/${currentUser.id}`),
-      fetch(`${BASE_URL}/api/attendance/location-request/${currentUser.id}`),
-    ]);
+    const attendanceRes = await fetch(`${BASE_URL}/api/attendance/${currentUser.id}`);
     const result = await attendanceRes.json();
-    const requestResult = await requestRes.json().catch(() => ({ success: false }));
     const rows = result.success ? result.data || [] : [];
-    const requestData = requestResult.success ? requestResult.data || {} : {};
-    attendanceLocationRequestState = {
-      officeZone:
-        requestData.officeZone || { ...ATTENDANCE_GEOFENCE, type: "office", label: "Office" },
-      activeRequest: requestData.activeRequest || null,
-      activeZone:
-        requestData.activeZone || requestData.officeZone || { ...ATTENDANCE_GEOFENCE, type: "office", label: "Office" },
-    };
     const today = new Date().toISOString().slice(0, 10);
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
@@ -1865,7 +1838,6 @@ async function loadAttendance() {
 
     if (actions) {
       actions.innerHTML = `
-        ${renderAttendanceSupportCards()}
         <button type="button" class="save-btn attendance-calendar-btn" onclick="toggleAttendanceCalendar()">Calendar</button>
         <button type="button" class="save-btn attendance-btn" onclick="markAttendance('check-in')" ${canCheckIn && !attendanceUpdating ? "" : "disabled"}>Check In</button>
         <button type="button" class="cancel-btn attendance-btn" onclick="markAttendance('check-out')" ${canCheckOut && !attendanceUpdating ? "" : "disabled"}>Check Out</button>
@@ -1928,7 +1900,6 @@ async function markAttendance(type) {
     attendanceUpdating = true;
     setAttendanceButtonsDisabled(true);
     const location = await getCurrentLocation();
-    validateAttendanceLocationForClient(location);
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -1961,287 +1932,15 @@ function setAttendanceButtonsDisabled(disabled) {
     .forEach((button) => (button.disabled = disabled));
 }
 
-function calculateClientDistanceInMeters(lat1, lng1, lat2, lng2) {
-  const earthRadiusMeters = 6371000;
-  const toRadians = (value) => (Number(value) * Math.PI) / 180;
-  const dLat = toRadians(lat2 - lat1);
-  const dLng = toRadians(lng2 - lng1);
-  const startLat = toRadians(lat1);
-  const endLat = toRadians(lat2);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(startLat) *
-      Math.cos(endLat) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return earthRadiusMeters * c;
-}
-
-function escapeAttendanceHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function formatAttendanceRequestDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getAttendanceRequestStatusMeta(status) {
-  const normalizedStatus = String(status || "pending").toLowerCase();
-
-  switch (normalizedStatus) {
-    case "approved":
-      return { label: "Approved by Admin", className: "approved" };
-    case "rejected":
-      return { label: "Rejected", className: "rejected" };
-    case "cancelled":
-      return { label: "Cancelled", className: "cancelled" };
-    default:
-      return { label: "Pending Approval", className: "pending" };
-  }
-}
-
-function setupAttendanceLocationRequestModal() {
-  const modal = document.getElementById("attendanceLocationRequestModal");
-  const form = document.getElementById("attendanceLocationRequestForm");
-  if (!modal || !form) return;
-
-  modal.addEventListener("click", (event) => {
-    if (event.target === modal) {
-      closeAttendanceLocationRequestModal();
-    }
-  });
-
-  form.addEventListener("submit", submitAttendanceLocationRequest);
-
-  document.addEventListener("keydown", (event) => {
-    if (
-      event.key === "Escape" &&
-      modal &&
-      !modal.classList.contains("hidden")
-    ) {
-      closeAttendanceLocationRequestModal();
-    }
-  });
-}
-
-function openAttendanceLocationRequestModal() {
-  const modal = document.getElementById("attendanceLocationRequestModal");
-  const form = document.getElementById("attendanceLocationRequestForm");
-  const submitBtn = document.getElementById("attendanceLocationRequestSubmitBtn");
-  if (!modal || !form) return;
-
-  form.reset();
-  const activeRequest = attendanceLocationRequestState.activeRequest;
-  if (activeRequest) {
-    form.elements.locationLabel.value = activeRequest.requestedAddress || "";
-    form.elements.meetingWith.value = activeRequest.meetingWith || "";
-    form.elements.purpose.value = activeRequest.purpose || "";
-    form.elements.notes.value = activeRequest.notes || "";
-  }
-
-  if (submitBtn) {
-    submitBtn.textContent =
-      activeRequest && activeRequest.status === "pending"
-        ? "Update Request"
-        : "Send Request";
-  }
-
-  modal.classList.remove("hidden");
-}
-
-function closeAttendanceLocationRequestModal() {
-  const modal = document.getElementById("attendanceLocationRequestModal");
-  if (!modal) return;
-  modal.classList.add("hidden");
-}
-
-function getClientAttendanceZone() {
-  const activeRequest = attendanceLocationRequestState.activeRequest;
-  if (activeRequest?.status === "approved" && attendanceLocationRequestState.activeZone) {
-    return attendanceLocationRequestState.activeZone;
-  }
-
-  return attendanceLocationRequestState.officeZone || ATTENDANCE_GEOFENCE;
-}
-
-function validateAttendanceLocationForClient(location) {
-  const zone = getClientAttendanceZone();
-  const distanceMeters = calculateClientDistanceInMeters(
-    Number(location?.lat),
-    Number(location?.lng),
-    Number(zone.latitude),
-    Number(zone.longitude),
-  );
-  const gpsAccuracyBuffer = Math.min(
-    Math.max(Number(location?.accuracy) || 0, 0),
-    25,
-  );
-  const effectiveRadius = Number(zone.radiusMeters || 0) + gpsAccuracyBuffer;
-
-  if (distanceMeters <= effectiveRadius) {
-    return distanceMeters;
-  }
-
-  const activeRequest = attendanceLocationRequestState.activeRequest;
-  if (activeRequest?.status === "approved") {
-    throw new Error(
-      `Approved meeting location ke ${zone.radiusMeters}m andar hi attendance chalegi. Aap abhi lagbhag ${Math.round(distanceMeters)}m away ho.`,
-    );
-  }
-
-  const pendingNote =
-    activeRequest?.status === "pending"
-      ? " Offsite request abhi admin approval me pending hai."
-      : activeRequest?.status === "rejected"
-        ? activeRequest.adminRemark
-          ? ` Admin note: ${activeRequest.adminRemark}`
-          : " Offsite request reject ho chuki hai."
-        : " Agar meeting par ho to offsite request admin ko bhejo.";
-
-  throw new Error(
-    `Attendance ${ATTENDANCE_GEOFENCE.radiusMeters}m office range ke andar hi chalegi. Aap lagbhag ${Math.round(distanceMeters)}m away ho.${pendingNote}`,
-  );
-}
-
-function renderAttendanceSupportCards() {
-  const officeZone = attendanceLocationRequestState.officeZone || ATTENDANCE_GEOFENCE;
-  const activeRequest = attendanceLocationRequestState.activeRequest;
-  const statusMeta = getAttendanceRequestStatusMeta(activeRequest?.status);
-  const actionLabel =
-    activeRequest && activeRequest.status === "pending"
-      ? "Update Offsite Request"
-      : activeRequest && activeRequest.status === "approved"
-        ? "Change Approved Location"
-        : "Request Offsite Approval";
-
-  const requestCard = activeRequest
-    ? `
-      <div class="attendance-support-card ${statusMeta.className}">
-        <div class="attendance-support-status ${statusMeta.className}">
-          <i class="fas fa-location-dot"></i>
-          <span>${statusMeta.label}</span>
-        </div>
-        <h4>Offsite Attendance</h4>
-        <p>${escapeAttendanceHtml(activeRequest.purpose || "Meeting-based offsite request")}</p>
-        <div class="attendance-support-meta">
-          <span>${escapeAttendanceHtml(activeRequest.requestedAddress || "Requested location")}
-            <small>${activeRequest.requestedLocationUrl ? `<a class="attendance-zone-link" href="${activeRequest.requestedLocationUrl}" target="_blank" rel="noopener noreferrer">Open map</a>` : "Map link unavailable"}</small>
-          </span>
-          <span>${escapeAttendanceHtml(activeRequest.meetingWith || "No meeting contact added")}
-            <small>${activeRequest.reviewedAt ? `Reviewed ${escapeAttendanceHtml(formatAttendanceRequestDateTime(activeRequest.reviewedAt))}` : `Requested ${escapeAttendanceHtml(formatAttendanceRequestDateTime(activeRequest.createdAt))}`}</small>
-          </span>
-          <span>${activeRequest.status === "approved" ? `${activeRequest.approvedRadiusMeters}m approved radius` : `${activeRequest.requestedRadiusMeters}m requested radius`}
-            <small>${escapeAttendanceHtml(activeRequest.adminRemark || (activeRequest.status === "approved" ? "Admin approval active for this location." : "Waiting for admin review."))}</small>
-          </span>
-        </div>
-        <div class="attendance-support-actions">
-          <button type="button" class="save-btn" onclick="openAttendanceLocationRequestModal()">${actionLabel}</button>
-          <button type="button" class="cancel-btn" onclick="loadAttendance()">Refresh Status</button>
-        </div>
-      </div>
-    `
-    : `
-      <div class="attendance-support-card">
-        <h4>Need Offsite Check-in?</h4>
-        <p>Client meeting, field visit, ya external discussion ke liye current GPS location admin ko bhejo. Approval milte hi aap wahi se attendance mark kar paoge.</p>
-        <div class="attendance-support-actions">
-          <button type="button" class="save-btn" onclick="openAttendanceLocationRequestModal()">Request Offsite Approval</button>
-        </div>
-      </div>
-    `;
-
-  return `
-    <div class="attendance-support-grid">
-      <div class="attendance-support-card office">
-        <h4>Office Geofence</h4>
-        <p>Regular attendance ${officeZone.radiusMeters}m office range ke andar hi chalegi.</p>
-        <div class="attendance-support-meta">
-          <span>${escapeAttendanceHtml(officeZone.address || ATTENDANCE_GEOFENCE.address)}
-            <small><a class="attendance-zone-link" href="https://www.google.com/maps?q=${officeZone.latitude},${officeZone.longitude}" target="_blank" rel="noopener noreferrer">Open office map</a></small>
-          </span>
-        </div>
-      </div>
-      ${requestCard}
-    </div>
-  `;
-}
-
-async function submitAttendanceLocationRequest(event) {
-  event.preventDefault();
-
-  if (!currentUser?.id || attendanceLocationRequestSubmitting) return;
-
-  const form = event.currentTarget;
-  const submitBtn = document.getElementById("attendanceLocationRequestSubmitBtn");
-  const formData = new FormData(form);
-  const payload = {
-    userId: currentUser.id,
-    locationLabel: formData.get("locationLabel"),
-    meetingWith: formData.get("meetingWith"),
-    purpose: formData.get("purpose"),
-    notes: formData.get("notes"),
-  };
-
-  try {
-    attendanceLocationRequestSubmitting = true;
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Sending...";
-    }
-
-    const location = await getCurrentLocation();
-    const res = await fetch(`${BASE_URL}/api/attendance/location-request`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, ...location }),
-    });
-    const result = await res.json();
-
-    if (!res.ok || !result.success) {
-      throw new Error(result.message || "Failed to send offsite attendance request");
-    }
-
-    closeAttendanceLocationRequestModal();
-    showPopup("Attendance", result.message || "Offsite attendance request sent to admin.", true);
-    await loadAttendance();
-  } catch (err) {
-    console.error("Attendance location request error:", err);
-    showPopup("Attendance", err.message || "Failed to send offsite attendance request", false);
-  } finally {
-    attendanceLocationRequestSubmitting = false;
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Send Request";
-    }
-  }
-}
-
 function getCurrentLocation() {
   return new Promise((resolve, reject) => {
     if (!window.isSecureContext) {
-      reject(new Error("Location ke liye page localhost ya HTTPS par open karo."));
+      reject(new Error("Open this page on localhost or HTTPS to use location access."));
       return;
     }
 
     if (!navigator.geolocation) {
-      reject(new Error("Is browser me location support nahi hai."));
+      reject(new Error("Location is not supported in this browser."));
       return;
     }
 
@@ -2256,10 +1955,10 @@ function getCurrentLocation() {
       (error) => {
         const message =
           error.code === error.PERMISSION_DENIED
-            ? "Location permission allow karo, tabhi attendance save hogi."
+            ? "Please allow location permission to save attendance."
             : error.code === error.TIMEOUT
-              ? "Location fetch timeout ho gaya. GPS/location on karke retry karo."
-              : "Location fetch nahi ho paya. GPS/location on karke retry karo.";
+              ? "Location fetch timed out. Turn on GPS/location and try again."
+              : "Unable to fetch location. Turn on GPS/location and try again.";
         reject(new Error(message));
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
