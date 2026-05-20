@@ -2132,8 +2132,8 @@ function filterTeamByRole(role) {
                 <td>${user.total_followups || 0}</td>
 
                 <td>
-                    <button 
-                        class="attBtn" 
+                    <button
+                        class="attBtn"
                         onclick="openEmployeeDetails(${user.id})"
                     >
                         View
@@ -2141,8 +2141,8 @@ function filterTeamByRole(role) {
                 </td>
 
                 <td>
-                    <button 
-                        class="attBtn secondary" 
+                    <button
+                        class="attBtn secondary"
                         onclick="openUserEditForm(${user.id})"
                     >
                         Update
