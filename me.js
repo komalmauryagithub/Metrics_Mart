@@ -1544,21 +1544,21 @@ function validateAttendanceLocationForClient(location) {
   const activeRequest = attendanceLocationRequestState.activeRequest;
   if (activeRequest?.status === "approved") {
     throw new Error(
-      `Approved meeting location ke ${zone.radiusMeters}m andar hi attendance chalegi. Aap abhi lagbhag ${Math.round(distanceMeters)}m away ho.`,
+      `Attendance is allowed within ${zone.radiusMeters}m of the approved meeting location. Your current distance is about ${Math.round(distanceMeters)}m.`,
     );
   }
 
   const pendingNote =
     activeRequest?.status === "pending"
-      ? " Offsite request abhi admin approval me pending hai."
+      ? " Your offsite request is still pending admin approval."
       : activeRequest?.status === "rejected"
         ? activeRequest.adminRemark
           ? ` Admin note: ${activeRequest.adminRemark}`
-          : " Offsite request reject ho chuki hai."
-        : " Agar meeting par ho to offsite request admin ko bhejo.";
+          : " Your latest offsite request was rejected."
+        : " Send an offsite request to admin if you are at a meeting location.";
 
   throw new Error(
-    `Attendance ${ATTENDANCE_GEOFENCE.radiusMeters}m office range ke andar hi chalegi. Aap lagbhag ${Math.round(distanceMeters)}m away ho.${pendingNote}`,
+    `Attendance is allowed within ${ATTENDANCE_GEOFENCE.radiusMeters}m of the office. Your current distance is about ${Math.round(distanceMeters)}m.${pendingNote}`,
   );
 }
 
@@ -1602,7 +1602,7 @@ function renderAttendanceSupportCards() {
     : `
       <div class="attendance-support-card">
         <h4>Need Offsite Check-in?</h4>
-        <p>Client meeting, field visit, ya external discussion ke liye current GPS location admin ko bhejo. Approval milte hi aap wahi se attendance mark kar paoge.</p>
+        <p>Send your current GPS location to admin for a client meeting, field visit, or external discussion. Once approved, you can mark attendance from that location.</p>
         <div class="attendance-support-actions">
           <button type="button" class="btn btn-save" onclick="openAttendanceLocationRequestModal()">Request Offsite Approval</button>
         </div>
@@ -1613,7 +1613,7 @@ function renderAttendanceSupportCards() {
     <div class="attendance-support-grid">
       <div class="attendance-support-card office">
         <h4>Office Geofence</h4>
-        <p>Regular attendance ${officeZone.radiusMeters}m office range ke andar hi chalegi.</p>
+        <p>Regular attendance is allowed within ${officeZone.radiusMeters}m of the office location.</p>
         <div class="attendance-support-meta">
           <span>${escapeAttendanceHtml(officeZone.address || ATTENDANCE_GEOFENCE.address)}
             <small><a class="attendance-zone-link" href="https://www.google.com/maps?q=${officeZone.latitude},${officeZone.longitude}" target="_blank" rel="noopener noreferrer">Open office map</a></small>
@@ -1777,7 +1777,6 @@ async function markAttendance(type) {
     attendanceUpdating = true;
     setAttendanceButtonsDisabled(true);
     const location = await getCurrentLocation();
-    validateAttendanceLocationForClient(location);
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -1813,12 +1812,12 @@ function setAttendanceButtonsDisabled(disabled) {
 function getCurrentLocation() {
   return new Promise((resolve, reject) => {
     if (!window.isSecureContext) {
-      reject(new Error("Location ke liye page localhost ya HTTPS par open karo."));
+      reject(new Error("Open this page on localhost or HTTPS to use location access."));
       return;
     }
 
     if (!navigator.geolocation) {
-      reject(new Error("Is browser me location support nahi hai."));
+      reject(new Error("Location is not supported in this browser."));
       return;
     }
 
@@ -1833,10 +1832,10 @@ function getCurrentLocation() {
       (error) => {
         const message =
           error.code === error.PERMISSION_DENIED
-            ? "Location permission allow karo, tabhi attendance save hogi."
+            ? "Please allow location permission to save attendance."
             : error.code === error.TIMEOUT
-              ? "Location fetch timeout ho gaya. GPS/location on karke retry karo."
-              : "Location fetch nahi ho paya. GPS/location on karke retry karo.";
+              ? "Location fetch timed out. Turn on GPS/location and try again."
+              : "Unable to fetch location. Turn on GPS/location and try again.";
         reject(new Error(message));
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
