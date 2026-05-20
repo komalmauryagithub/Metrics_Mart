@@ -2830,6 +2830,7 @@ function openHrUserForm() {
   if (!modal) return;
 
   resetHrUserForm();
+  populateHrNextEmployeeCode();
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
 
@@ -2868,6 +2869,33 @@ function resetHrUserForm() {
   }
   if (joiningField) {
     joiningField.value = getTodayKey();
+  }
+}
+
+async function populateHrNextEmployeeCode() {
+  const form = document.getElementById("hrRegisterForm");
+  const employeeCodeField = form?.elements?.employee_code;
+  if (!employeeCodeField) return;
+
+  employeeCodeField.value = "Generating...";
+
+  try {
+    const response = await fetch(`${BASE_URL}/api/users/next-employee-code`, {
+      cache: "no-store",
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to generate employee code");
+    }
+
+    employeeCodeField.value =
+      result.employeeCode ||
+      result.data?.employee_code ||
+      "";
+  } catch (error) {
+    console.warn("HR next employee code load failed:", error);
+    employeeCodeField.value = "Auto-generated";
   }
 }
 
@@ -2913,10 +2941,10 @@ async function submitHrUserRegistration(event) {
       ? await handleHrProfileSetupInvite(data.profileSetup)
       : null;
     const successMessage = inviteResult?.emailSent
-      ? "User created successfully. Profile setup email sent."
+      ? "User created successfully. Profile form email sent successfully."
       : inviteResult?.copied
-        ? "User created successfully. Profile setup link copied."
-        : "User created successfully.";
+        ? "User created successfully. Profile form link copied."
+        : "User created successfully. Profile form link is ready for manual sharing.";
 
     closeHrUserForm();
     await refreshHrPanel({ showSuccessToast: false });
@@ -2975,9 +3003,9 @@ async function handleHrProfileSetupInvite(profileSetup) {
     ? emailDispatch.missingConfig.filter((value) => String(value || "").trim())
     : [];
   const baseEmailMessage = String(emailDispatch.message || "").trim();
-  const emailMessage = !emailSent && requiredConfig.length
-    ? `${baseEmailMessage || "Automatic profile setup email could not be sent."} Configure ${requiredConfig.join(", ")} in the server .env file to enable auto email.`
-    : baseEmailMessage;
+  const emailMessage = emailSent
+    ? baseEmailMessage || "Profile form email sent successfully."
+    : baseEmailMessage || "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
 
   return {
     copied: false,
@@ -3014,7 +3042,7 @@ function getHrProfileSetupFallbackActions(profileSetup = {}) {
       const copied = await copyTextToClipboard(profileSetup.invitationLink || "");
       showHrActionPopup(
         copied ? "Link Copied" : "Profile Link",
-        copied ? "Profile setup link copied." : profileSetup.invitationLink || "Profile setup link unavailable.",
+        copied ? "Profile form link copied." : profileSetup.invitationLink || "Profile form link unavailable.",
         copied,
         { autoClose: copied ? undefined : false },
       );
@@ -3032,7 +3060,7 @@ function getHrProfileSetupFallbackActions(profileSetup = {}) {
 
 function showHrProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
   const message = inviteResult.emailMessage ||
-    "User created successfully. The profile setup email was not sent automatically.";
+    "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
   const canTryAutomaticEmail =
     !Array.isArray(inviteResult.requiredConfig) || inviteResult.requiredConfig.length === 0;
   const actions = [
@@ -3049,8 +3077,8 @@ function showHrProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) 
   ];
 
   showHrActionPopup(
-    "Send Profile Form",
-    `${message} Use the options below to share the second form link with the employee.`,
+    "Profile Form Link Ready",
+    message,
     false,
     {
       autoClose: false,
@@ -3064,7 +3092,7 @@ async function resendHrProfileSetupEmail(userId, profileSetup = {}, button = nul
   let latestProfileSetup = profileSetup || {};
   if (!normalizedUserId) {
     showHrActionPopup(
-      "Profile Email",
+      "Profile Form",
       "User was created, but user id is missing for email resend.",
       false,
       { autoClose: false, actions: [{ label: "Close", variant: "secondary", onClick: hideHrActionPopup }] },
@@ -3079,7 +3107,7 @@ async function resendHrProfileSetupEmail(userId, profileSetup = {}, button = nul
   }
 
   try {
-    showToast("Sending profile setup email...");
+    showToast("Sending profile form email...");
     const response = await fetch(`${BASE_URL}/api/admin/users/${normalizedUserId}/profile-setup-link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3093,20 +3121,20 @@ async function resendHrProfileSetupEmail(userId, profileSetup = {}, button = nul
     if (!response.ok || !result.success) {
       throw new Error(
         result.message ||
-        "Profile setup email could not be sent. Please check SMTP settings.",
+        "Profile form email could not be sent. Please share the link manually.",
       );
     }
 
     if (!emailDispatch.sent) {
       throw new Error(
         emailDispatch.message ||
-        "Profile setup email could not be sent. Please check SMTP settings.",
+        "Profile form email could not be sent. Please share the link manually.",
       );
     }
 
     showHrActionPopup(
-      "Profile Email Sent",
-      emailDispatch.message || "Profile setup email sent successfully.",
+      "Profile Form Email Sent",
+      emailDispatch.message || "Profile form email sent successfully.",
       true,
     );
   } catch (error) {
@@ -3114,10 +3142,10 @@ async function resendHrProfileSetupEmail(userId, profileSetup = {}, button = nul
     if (!expectedConfigMessage) {
       console.warn("HR profile setup email resend failed:", error);
     }
-    showToast(error.message || "Profile setup email could not be sent.", true);
+    showToast(error.message || "Profile form email could not be sent.", true);
     showHrActionPopup(
       "Email Not Sent",
-      error.message || "Profile setup email could not be sent. Please check SMTP settings.",
+      error.message || "Profile form email could not be sent. Please share the link manually.",
       false,
       {
         autoClose: false,
