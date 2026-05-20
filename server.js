@@ -225,6 +225,8 @@ const LOCAL_PASSWORD_RESET_COOKIE = "mm_local_password_reset";
 const DEFAULT_EMAIL_FROM_NAME = String(
   process.env.SMTP_FROM_NAME || process.env.EMAIL_FROM_NAME || "Metrics Mart Admin",
 ).trim();
+const EMPLOYEE_CODE_PREFIX = "EMP";
+const EMPLOYEE_CODE_PAD_LENGTH = 4;
 
 function isLoopbackHostValue(value = "") {
   const normalized = String(value || "")
@@ -998,20 +1000,14 @@ function buildProfileInviteMailerSetupMessage(prefix, missingKeys) {
     return prefix;
   }
 
-  return `${prefix} Add ${keys.join(", ")} in the server .env file. See .env.example for the ready format.`;
+  return prefix;
 }
 
 function buildProfileInviteMailerMissingBaseConfigMessage(missingKeys, hasAuthCredentials) {
-  const baseMessage = buildProfileInviteMailerSetupMessage(
-    "Automatic email is not configured on the server yet.",
+  return buildProfileInviteMailerSetupMessage(
+    "Email service is being configured on the server. The profile form link is ready for manual sharing.",
     missingKeys,
   );
-
-  if (hasAuthCredentials) {
-    return baseMessage;
-  }
-
-  return `${baseMessage} Or add SMTP_USER and SMTP_PASS for Gmail, Outlook, or Zoho auto-detection.`;
 }
 
 function getProfileInviteMailerConfig() {
@@ -1251,7 +1247,7 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     return {
       sent: false,
       status: "skipped",
-      message: "User email is missing, so the profile setup email was not sent.",
+      message: "Employee email is missing. The profile form link is ready for manual sharing.",
     };
   }
 
@@ -1260,7 +1256,7 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     return {
       sent: false,
       status: "skipped",
-      message: mailer.reason || "Automatic email is not configured on the server yet.",
+      message: mailer.reason || "Email service is being configured on the server. The profile form link is ready for manual sharing.",
       missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
     };
   }
@@ -1277,14 +1273,14 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     return {
       sent: true,
       status: "sent",
-      message: `Profile setup email sent automatically to ${inviteEmail}.`,
+      message: `Profile form email sent successfully to ${inviteEmail}.`,
     };
   } catch (err) {
     console.error("Profile setup email send failed:", err);
     return {
       sent: false,
       status: "failed",
-      message: "Automatic profile setup email failed. Please check SMTP settings.",
+      message: "Profile form email could not be sent. Please share the link manually.",
     };
   }
 }
@@ -1408,6 +1404,7 @@ function buildProfileSetupCompletionHtml(req, profile) {
         <p style="margin:0 0 18px;color:#475569;">Submitted on ${escapeProfileSetupEmailHtml(completedAt)}. The details below are ready for admin and HR review.</p>
 
         ${buildProfileSetupSectionHtml("Employee", [
+          { label: "Employee code", value: profile.employee_code },
           { label: "Name", value: profile.name },
           { label: "Email", value: profile.email },
           { label: "Contact", value: profile.contact },
@@ -1456,6 +1453,7 @@ function buildProfileSetupCompletionText(req, profile) {
   return [
     `${formatProfileSetupEmailValue(profile.name, "Employee")} completed the employee profile form.`,
     "",
+    `Employee code: ${formatProfileSetupEmailValue(profile.employee_code)}`,
     `Name: ${formatProfileSetupEmailValue(profile.name)}`,
     `Email: ${formatProfileSetupEmailValue(profile.email)}`,
     `Contact: ${formatProfileSetupEmailValue(profile.contact)}`,
@@ -1528,7 +1526,7 @@ async function sendProfileSetupCompletionEmail(req, profile) {
     return {
       sent: false,
       status: "skipped",
-      message: "No admin or HR email recipients were found.",
+      message: "No admin or HR email recipient was found, but the profile details were saved.",
     };
   }
 
@@ -1537,7 +1535,7 @@ async function sendProfileSetupCompletionEmail(req, profile) {
     return {
       sent: false,
       status: "skipped",
-      message: mailer.reason || "Automatic email is not configured on the server yet.",
+      message: "Email service is being configured on the server. Admin and HR can view the completed profile in the panel.",
       missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
     };
   }
@@ -1554,7 +1552,7 @@ async function sendProfileSetupCompletionEmail(req, profile) {
     return {
       sent: true,
       status: "sent",
-      message: `Profile submission email sent to admin/HR (${recipients.join(", ")}).`,
+      message: "Profile completion notification sent to Admin and HR.",
       recipients,
     };
   } catch (err) {
@@ -1562,7 +1560,7 @@ async function sendProfileSetupCompletionEmail(req, profile) {
     return {
       sent: false,
       status: "failed",
-      message: "Profile submission email failed. Please check SMTP settings.",
+      message: "Profile completion notification could not be sent, but the profile details were saved.",
     };
   }
 }
@@ -2967,6 +2965,35 @@ async function ensureUserRegistrationColumns() {
 ensureUserRegistrationColumns().catch((err) => {
   console.error("User registration schema setup failed:", err);
 });
+
+function formatEmployeeCode(sequenceNumber) {
+  const normalizedSequence = Math.max(1, Number(sequenceNumber || 1));
+  return `${EMPLOYEE_CODE_PREFIX}${String(normalizedSequence).padStart(EMPLOYEE_CODE_PAD_LENGTH, "0")}`;
+}
+
+function parseEmployeeCodeSequence(employeeCode) {
+  const pattern = new RegExp(`^${EMPLOYEE_CODE_PREFIX}(\\d+)$`, "i");
+  const match = String(employeeCode || "").trim().match(pattern);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+async function getNextEmployeeCode() {
+  await ensureUserRegistrationColumns();
+
+  const [rows] = await dbPromise.query(
+    `
+      SELECT employee_code
+      FROM users
+      WHERE employee_code REGEXP ?
+      ORDER BY CAST(SUBSTRING(employee_code, ?) AS UNSIGNED) DESC
+      LIMIT 1
+    `,
+    [`^${EMPLOYEE_CODE_PREFIX}[0-9]+$`, EMPLOYEE_CODE_PREFIX.length + 1],
+  );
+
+  const lastSequence = parseEmployeeCodeSequence(rows[0]?.employee_code);
+  return formatEmployeeCode(lastSequence + 1);
+}
 
 async function ensureUserProfileSetupColumns() {
   await ensureUserRegistrationColumns();
@@ -5271,6 +5298,25 @@ app.get("/api/health", (req, res) => {
   res.json({ success: true, message: "Server is running" });
 });
 
+app.get("/api/users/next-employee-code", async (req, res) => {
+  try {
+    const employeeCode = await getNextEmployeeCode();
+    res.json({
+      success: true,
+      employeeCode,
+      data: {
+        employee_code: employeeCode,
+      },
+    });
+  } catch (err) {
+    console.error("Next employee code error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate employee code",
+    });
+  }
+});
+
 app.post("/register", (req, res) => {
   userRegistrationUpload(req, res, async (uploadErr) => {
     if (uploadErr) {
@@ -5287,7 +5333,7 @@ app.post("/register", (req, res) => {
       });
     }
 
-    const employeeCode = String(req.body.employee_code || "").trim() || null;
+    let employeeCode = null;
     const name = String(req.body.name || "").trim();
     const dateOfBirth = normalizeDateOnlyValue(req.body.date_of_birth) || null;
     const gender = String(req.body.gender || "").trim().toLowerCase() || null;
@@ -5412,6 +5458,7 @@ app.post("/register", (req, res) => {
       await ensureUserRegistrationColumns();
       await ensureUserProfileSetupColumns();
       await ensurePayrollUserColumns();
+      employeeCode = await getNextEmployeeCode();
       const [insertResult] = await dbPromise.query(sql, [
         employeeCode,
         name,
@@ -5472,6 +5519,7 @@ app.post("/register", (req, res) => {
         success: true,
         message: "Registration successful!",
         userId: createdUserId || null,
+        employeeCode,
         profileSetup,
       });
     } catch (err) {
@@ -5495,6 +5543,7 @@ async function getProfileSetupUserByToken(token) {
       `
         SELECT
           u.id,
+          u.employee_code,
           u.name,
           u.email,
           u.contact,
@@ -5546,6 +5595,7 @@ async function getProfileSetupUserByToken(token) {
     `
       SELECT
         id,
+        employee_code,
         name,
         email,
         contact,
@@ -5648,7 +5698,7 @@ app.post("/api/admin/users/:id/profile-setup-link", async (req, res) => {
     );
     const inviteMessage = profileSetup?.emailDispatch?.sent
       ? profileSetup.emailDispatch.message
-      : profileSetup?.emailDispatch?.message || "Profile completion link generated";
+      : profileSetup?.emailDispatch?.message || "Profile form link generated";
     const emailSent = Boolean(profileSetup?.emailDispatch?.sent);
     const responsePayload = {
       success: !requireEmail || emailSent,
@@ -5950,15 +6000,15 @@ app.post("/api/profile-setup/:token", (req, res) => {
         return {
           sent: false,
           status: "failed",
-          message: "Profile submission email failed. Please check SMTP settings.",
+          message: "Profile completion notification could not be sent, but the profile details were saved.",
         };
       });
 
       res.json({
         success: true,
         message: notificationDispatch?.sent
-          ? "Profile details submitted successfully. Admin and HR have been notified."
-          : "Profile details submitted successfully",
+          ? "Your profile has been completed successfully. Admin and HR have been notified."
+          : "Your profile has been completed successfully. Admin and HR can now view your details.",
         notificationDispatch,
       });
     } catch (err) {
