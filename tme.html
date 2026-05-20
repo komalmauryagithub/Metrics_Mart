@@ -486,47 +486,6 @@
         </div>
     </div>
 
-    <div id="attendanceLocationRequestModal" class="attendance-request-modal hidden">
-        <div class="attendance-request-modal-card">
-            <div class="attendance-request-modal-header">
-                <div>
-                    <h3>Offsite Attendance Request</h3>
-                    <p>Meeting ya field visit ke liye current location admin ko approval ke liye bhejo.</p>
-                </div>
-                <button type="button" class="attendance-request-modal-close" onclick="closeAttendanceLocationRequestModal()" aria-label="Close offsite attendance request modal">
-                    <i class="fas fa-xmark"></i>
-                </button>
-            </div>
-            <form id="attendanceLocationRequestForm" class="attendance-request-form">
-                <div class="attendance-request-modal-grid">
-                    <div class="attendance-request-field">
-                        <label for="attendanceLocationLabel">Meeting Location *</label>
-                        <input type="text" id="attendanceLocationLabel" name="locationLabel" placeholder="Example: Client office, Andheri East" required>
-                    </div>
-                    <div class="attendance-request-field">
-                        <label for="attendanceMeetingWith">Meeting With</label>
-                        <input type="text" id="attendanceMeetingWith" name="meetingWith" placeholder="Client / company name">
-                    </div>
-                    <div class="attendance-request-field attendance-request-field-full">
-                        <label for="attendancePurpose">Purpose *</label>
-                        <input type="text" id="attendancePurpose" name="purpose" placeholder="Example: Client meeting, site visit, project discussion" required>
-                    </div>
-                    <div class="attendance-request-field attendance-request-field-full">
-                        <label for="attendanceRequestNotes">Notes</label>
-                        <textarea id="attendanceRequestNotes" name="notes" rows="4" placeholder="Anything admin should know before approving this location"></textarea>
-                    </div>
-                </div>
-                <div class="attendance-request-modal-note">
-                    Current GPS location request ke saath auto-attach hogi. Approval milne ke baad aap approved meeting area se check-in/check-out kar paoge.
-                </div>
-                <div class="attendance-request-modal-actions">
-                    <button type="button" class="cancel-btn" onclick="closeAttendanceLocationRequestModal()">Cancel</button>
-                    <button type="submit" class="save-btn" id="attendanceLocationRequestSubmitBtn">Send Request</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <div id="targetModal" class="modal hidden">
         <div class="modal-content target-modal-content">
             <h2>Set Monthly Target</h2>
