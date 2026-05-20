@@ -64,7 +64,7 @@
           <li onclick="showSection('projects')">
             <i class="fas fa-tasks"></i> Projects
           </li>
-          
+
           <li onclick="showSection('team')">
             <i class="fas fa-user-group"></i> Team
           </li>
@@ -86,48 +86,85 @@
               <p>Welcome back, Admin! Here is today's CRM command center.</p>
             </div>
             <div class="admin-dashboard-actions">
-              <button type="button" class="icon-action-btn" onclick="refreshAdminDashboardView()" title="Refresh dashboard">
+              <button
+                type="button"
+                class="icon-action-btn"
+                onclick="refreshAdminDashboardView()"
+                title="Refresh dashboard"
+              >
                 <i class="fas fa-rotate-right"></i>
               </button>
-              <button type="button" class="primary-action-btn" onclick="openAdminTeamRegistration()">
+              <button
+                type="button"
+                class="primary-action-btn"
+                onclick="openAdminTeamRegistration()"
+              >
                 <i class="fas fa-plus"></i> Add User
               </button>
             </div>
           </div>
 
           <div class="admin-kpi-grid">
-            <button type="button" class="admin-kpi-card blue" onclick="openAdminSection('leads')">
+            <button
+              type="button"
+              class="admin-kpi-card blue"
+              onclick="openAdminSection('leads')"
+            >
               <span class="kpi-icon"><i class="fas fa-users"></i></span>
               <span>Total Leads</span>
               <strong id="adminTotalLeads">0</strong>
               <small id="adminLeadTrend">Live CRM data</small>
             </button>
-            <button type="button" class="admin-kpi-card green" onclick="openAdminSection('team')">
+            <button
+              type="button"
+              class="admin-kpi-card green"
+              onclick="openAdminSection('team')"
+            >
               <span class="kpi-icon"><i class="fas fa-user-check"></i></span>
               <span>Total Team</span>
               <strong id="adminTotalTeam">0</strong>
               <small>Active users except admin</small>
             </button>
-            <button type="button" class="admin-kpi-card violet" onclick="openAdminSection('deals')">
+            <button
+              type="button"
+              class="admin-kpi-card violet"
+              onclick="openAdminSection('deals')"
+            >
               <span class="kpi-icon"><i class="fas fa-briefcase"></i></span>
               <span>Open Deals</span>
               <strong id="adminOpenDeals">0</strong>
               <small id="adminDealTrend">Closed pipeline</small>
             </button>
-            <button type="button" class="admin-kpi-card amber" onclick="openAdminSection('deals')">
-              <span class="kpi-icon"><i class="fas fa-indian-rupee-sign"></i></span>
+            <button
+              type="button"
+              class="admin-kpi-card amber"
+              onclick="openAdminSection('deals')"
+            >
+              <span class="kpi-icon"
+                ><i class="fas fa-indian-rupee-sign"></i
+              ></span>
               <span>Total Revenue</span>
               <strong id="adminTotalRevenue">Rs. 0</strong>
               <small>Received payments</small>
             </button>
-            <button type="button" class="admin-kpi-card rose" onclick="openAdminSection('deals')">
+            <button
+              type="button"
+              class="admin-kpi-card rose"
+              onclick="openAdminSection('deals')"
+            >
               <span class="kpi-icon"><i class="fas fa-bullseye"></i></span>
               <span>Conversion Rate</span>
               <strong id="adminConversionRate">0%</strong>
               <small>Deals from leads</small>
             </button>
-            <button type="button" class="admin-kpi-card cyan-card" onclick="openAdminSection('followups')">
-              <span class="kpi-icon"><i class="fas fa-clipboard-check"></i></span>
+            <button
+              type="button"
+              class="admin-kpi-card cyan-card"
+              onclick="openAdminSection('followups')"
+            >
+              <span class="kpi-icon"
+                ><i class="fas fa-clipboard-check"></i
+              ></span>
               <span>Pending Follow Ups</span>
               <strong id="adminPendingTasks">0</strong>
               <small>Requires attention</small>
@@ -141,7 +178,9 @@
                   <h3>Leads Overview</h3>
                   <p>This week performance</p>
                 </div>
-                <button type="button" onclick="refreshAdminDashboardView()">This Week <i class="fas fa-chevron-down"></i></button>
+                <button type="button" onclick="refreshAdminDashboardView()">
+                  This Week <i class="fas fa-chevron-down"></i>
+                </button>
               </div>
               <canvas id="adminLeadsOverviewChart"></canvas>
             </section>
@@ -167,12 +206,51 @@
                 </div>
               </div>
               <div class="admin-funnel">
-                <div id="adminMainFunnelLeadsRow" class="funnel-row funnel-blue" role="button" tabindex="0" onclick="openAdminSection('leads')" onkeydown="handleDashboardShortcutKey(event, 'leads')"><span>Leads</span><b id="funnelTotalLeads">0</b></div>
-                <div id="adminMainFunnelAppointmentsRow" class="funnel-row funnel-green" role="button" tabindex="0" onclick="openAdminSection('appointments')" onkeydown="handleDashboardShortcutKey(event, 'appointments')"><span>Appointments</span><b id="funnelAppointments">0</b></div>
-                <div id="adminMainFunnelFollowupsRow" class="funnel-row funnel-orange" role="button" tabindex="0" onclick="openAdminSection('followups')" onkeydown="handleDashboardShortcutKey(event, 'followups')"><span>Follow Ups</span><b id="funnelFollowups">0</b></div>
-                <div id="adminMainFunnelDealsRow" class="funnel-row funnel-pink" role="button" tabindex="0" onclick="openAdminSection('deals')" onkeydown="handleDashboardShortcutKey(event, 'deals')"><span>Deals</span><b id="funnelDeals">0</b></div>
+                <div
+                  id="adminMainFunnelLeadsRow"
+                  class="funnel-row funnel-blue"
+                  role="button"
+                  tabindex="0"
+                  onclick="openAdminSection('leads')"
+                  onkeydown="handleDashboardShortcutKey(event, 'leads')"
+                >
+                  <span>Leads</span><b id="funnelTotalLeads">0</b>
+                </div>
+                <div
+                  id="adminMainFunnelAppointmentsRow"
+                  class="funnel-row funnel-green"
+                  role="button"
+                  tabindex="0"
+                  onclick="openAdminSection('appointments')"
+                  onkeydown="handleDashboardShortcutKey(event, 'appointments')"
+                >
+                  <span>Appointments</span><b id="funnelAppointments">0</b>
+                </div>
+                <div
+                  id="adminMainFunnelFollowupsRow"
+                  class="funnel-row funnel-orange"
+                  role="button"
+                  tabindex="0"
+                  onclick="openAdminSection('followups')"
+                  onkeydown="handleDashboardShortcutKey(event, 'followups')"
+                >
+                  <span>Follow Ups</span><b id="funnelFollowups">0</b>
+                </div>
+                <div
+                  id="adminMainFunnelDealsRow"
+                  class="funnel-row funnel-pink"
+                  role="button"
+                  tabindex="0"
+                  onclick="openAdminSection('deals')"
+                  onkeydown="handleDashboardShortcutKey(event, 'deals')"
+                >
+                  <span>Deals</span><b id="funnelDeals">0</b>
+                </div>
               </div>
-              <div class="conversion-pill">Overall Conversion Rate: <strong id="funnelConversionRate">0%</strong></div>
+              <div class="conversion-pill">
+                Overall Conversion Rate:
+                <strong id="funnelConversionRate">0%</strong>
+              </div>
             </section>
 
             <aside class="admin-panel activity-panel">
@@ -193,7 +271,9 @@
                   <h3>Recent Leads</h3>
                   <p>Newest enquiries</p>
                 </div>
-                <button type="button" onclick="openAdminSection('leads')">View All Leads</button>
+                <button type="button" onclick="openAdminSection('leads')">
+                  View All Leads
+                </button>
               </div>
               <div class="table-responsive">
                 <table class="admin-mini-table">
@@ -208,7 +288,9 @@
                     </tr>
                   </thead>
                   <tbody id="adminRecentLeads">
-                    <tr><td colspan="6">Loading recent leads...</td></tr>
+                    <tr>
+                      <td colspan="6">Loading recent leads...</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -220,7 +302,9 @@
                   <h3>Upcoming Follow Ups</h3>
                   <p>Next conversations</p>
                 </div>
-                <button type="button" onclick="openAdminSection('followups')">View Follow Ups</button>
+                <button type="button" onclick="openAdminSection('followups')">
+                  View Follow Ups
+                </button>
               </div>
               <div class="table-responsive">
                 <table class="admin-mini-table">
@@ -234,7 +318,9 @@
                     </tr>
                   </thead>
                   <tbody id="adminUpcomingFollowups">
-                    <tr><td colspan="5">Loading follow ups...</td></tr>
+                    <tr>
+                      <td colspan="5">Loading follow ups...</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -248,12 +334,32 @@
                 </div>
               </div>
               <div class="task-list">
-                <div><span><i class="fas fa-calendar-day"></i> Due Today</span><b id="taskDueToday">0</b></div>
-                <div><span><i class="fas fa-calendar-week"></i> Due This Week</span><b id="taskDueWeek">0</b></div>
-                <div><span><i class="fas fa-circle-check"></i> Won Deals</span><b id="taskCompletedWeek">0</b></div>
-                <div><span><i class="fas fa-triangle-exclamation"></i> Payment Pending</span><b id="taskOverdue">0</b></div>
+                <div>
+                  <span><i class="fas fa-calendar-day"></i> Due Today</span
+                  ><b id="taskDueToday">0</b>
+                </div>
+                <div>
+                  <span><i class="fas fa-calendar-week"></i> Due This Week</span
+                  ><b id="taskDueWeek">0</b>
+                </div>
+                <div>
+                  <span><i class="fas fa-circle-check"></i> Won Deals</span
+                  ><b id="taskCompletedWeek">0</b>
+                </div>
+                <div>
+                  <span
+                    ><i class="fas fa-triangle-exclamation"></i> Payment
+                    Pending</span
+                  ><b id="taskOverdue">0</b>
+                </div>
               </div>
-              <button type="button" class="wide-action-btn" onclick="openAdminSection('followups')">View All Tasks</button>
+              <button
+                type="button"
+                class="wide-action-btn"
+                onclick="openAdminSection('followups')"
+              >
+                View All Tasks
+              </button>
             </aside>
           </div>
 
@@ -295,13 +401,17 @@
                 <div>
                   <span>Remaining</span>
                   <strong id="adminTargetRemaining">Rs. 0</strong>
-                  <small id="adminTargetRemainingHint">Pending from target</small>
+                  <small id="adminTargetRemainingHint"
+                    >Pending from target</small
+                  >
                 </div>
               </article>
             </div>
 
             <div class="dashboard-panels">
-              <section class="dashboard-panel chart-panel target-progress-panel">
+              <section
+                class="dashboard-panel chart-panel target-progress-panel"
+              >
                 <div class="sales-target-header">
                   <div>
                     <h3>Target Progress</h3>
@@ -326,9 +436,16 @@
               <div class="sales-target-header">
                 <div>
                   <h3>ME & TME Target Board</h3>
-                  <p id="adminTeamTargetsSummary">Assign monthly targets and monitor live achievement.</p>
+                  <p id="adminTeamTargetsSummary">
+                    Assign monthly targets and monitor live achievement.
+                  </p>
                 </div>
-                <button type="button" class="refresh-dashboard-btn" onclick="loadAdminTeamTargetsSummary(true)" title="Refresh team targets">
+                <button
+                  type="button"
+                  class="refresh-dashboard-btn"
+                  onclick="loadAdminTeamTargetsSummary(true)"
+                  title="Refresh team targets"
+                >
                   <i class="fas fa-rotate-right"></i>
                 </button>
               </div>
@@ -338,8 +455,14 @@
             </section>
 
             <div class="dashboard-metrics">
-              <button type="button" class="metric-card sales" onclick="openAdminSection('deals')">
-                <span class="metric-icon"><i class="fas fa-indian-rupee-sign"></i></span>
+              <button
+                type="button"
+                class="metric-card sales"
+                onclick="openAdminSection('deals')"
+              >
+                <span class="metric-icon"
+                  ><i class="fas fa-indian-rupee-sign"></i
+                ></span>
                 <div>
                   <span>Closed Revenue</span>
                   <strong id="adminDashboardSales">Rs. 0</strong>
@@ -347,7 +470,11 @@
                 </div>
               </button>
 
-              <button type="button" class="metric-card leads" onclick="openAdminSection('leads')">
+              <button
+                type="button"
+                class="metric-card leads"
+                onclick="openAdminSection('leads')"
+              >
                 <span class="metric-icon"><i class="fas fa-users"></i></span>
                 <div>
                   <span>Total Leads</span>
@@ -356,8 +483,14 @@
                 </div>
               </button>
 
-              <button type="button" class="metric-card appointments" onclick="openAdminSection('appointments')">
-                <span class="metric-icon"><i class="fas fa-calendar-check"></i></span>
+              <button
+                type="button"
+                class="metric-card appointments"
+                onclick="openAdminSection('appointments')"
+              >
+                <span class="metric-icon"
+                  ><i class="fas fa-calendar-check"></i
+                ></span>
                 <div>
                   <span>Appointments</span>
                   <strong id="adminDashboardAppointments">0</strong>
@@ -365,8 +498,14 @@
                 </div>
               </button>
 
-              <button type="button" class="metric-card followups" onclick="openAdminSection('followups')">
-                <span class="metric-icon"><i class="fas fa-phone-volume"></i></span>
+              <button
+                type="button"
+                class="metric-card followups"
+                onclick="openAdminSection('followups')"
+              >
+                <span class="metric-icon"
+                  ><i class="fas fa-phone-volume"></i
+                ></span>
                 <div>
                   <span>Follow Ups</span>
                   <strong id="adminDashboardFollowups">0</strong>
@@ -374,8 +513,14 @@
                 </div>
               </button>
 
-              <button type="button" class="metric-card deals" onclick="openAdminSection('deals')">
-                <span class="metric-icon"><i class="fas fa-handshake"></i></span>
+              <button
+                type="button"
+                class="metric-card deals"
+                onclick="openAdminSection('deals')"
+              >
+                <span class="metric-icon"
+                  ><i class="fas fa-handshake"></i
+                ></span>
                 <div>
                   <span>Deals</span>
                   <strong id="adminDashboardDeals">0</strong>
@@ -383,8 +528,14 @@
                 </div>
               </button>
 
-              <button type="button" class="metric-card projects" onclick="openAdminSection('projects')">
-                <span class="metric-icon"><i class="fas fa-briefcase"></i></span>
+              <button
+                type="button"
+                class="metric-card projects"
+                onclick="openAdminSection('projects')"
+              >
+                <span class="metric-icon"
+                  ><i class="fas fa-briefcase"></i
+                ></span>
                 <div>
                   <span>Projects</span>
                   <strong id="adminDashboardProjects">0</strong>
@@ -403,26 +554,57 @@
                 </div>
 
                 <div class="admin-funnel admin-target-funnel">
-                  <div id="adminFunnelLeadsRow" class="funnel-row funnel-blue" role="button" tabindex="0" onclick="openAdminSection('leads')" onkeydown="handleDashboardShortcutKey(event, 'leads')">
+                  <div
+                    id="adminFunnelLeadsRow"
+                    class="funnel-row funnel-blue"
+                    role="button"
+                    tabindex="0"
+                    onclick="openAdminSection('leads')"
+                    onkeydown="handleDashboardShortcutKey(event, 'leads')"
+                  >
                     <span>Leads</span>
                     <b id="adminFunnelLeads">0</b>
                   </div>
-                  <div id="adminFunnelAppointmentsRow" class="funnel-row funnel-green" role="button" tabindex="0" onclick="openAdminSection('appointments')" onkeydown="handleDashboardShortcutKey(event, 'appointments')">
+                  <div
+                    id="adminFunnelAppointmentsRow"
+                    class="funnel-row funnel-green"
+                    role="button"
+                    tabindex="0"
+                    onclick="openAdminSection('appointments')"
+                    onkeydown="
+                      handleDashboardShortcutKey(event, 'appointments')
+                    "
+                  >
                     <span>Appointments</span>
                     <b id="adminFunnelAppointments">0</b>
                   </div>
-                  <div id="adminFunnelFollowupsRow" class="funnel-row funnel-orange" role="button" tabindex="0" onclick="openAdminSection('followups')" onkeydown="handleDashboardShortcutKey(event, 'followups')">
+                  <div
+                    id="adminFunnelFollowupsRow"
+                    class="funnel-row funnel-orange"
+                    role="button"
+                    tabindex="0"
+                    onclick="openAdminSection('followups')"
+                    onkeydown="handleDashboardShortcutKey(event, 'followups')"
+                  >
                     <span>Follow Ups</span>
                     <b id="adminFunnelFollowups">0</b>
                   </div>
-                  <div id="adminFunnelDealsRow" class="funnel-row funnel-pink" role="button" tabindex="0" onclick="openAdminSection('deals')" onkeydown="handleDashboardShortcutKey(event, 'deals')">
+                  <div
+                    id="adminFunnelDealsRow"
+                    class="funnel-row funnel-pink"
+                    role="button"
+                    tabindex="0"
+                    onclick="openAdminSection('deals')"
+                    onkeydown="handleDashboardShortcutKey(event, 'deals')"
+                  >
                     <span>Deals</span>
                     <b id="adminFunnelDeals">0</b>
                   </div>
                 </div>
 
                 <div class="conversion-pill">
-                  Overall Conversion: <strong id="adminDashboardFunnelRate">0% converted</strong>
+                  Overall Conversion:
+                  <strong id="adminDashboardFunnelRate">0% converted</strong>
                 </div>
               </section>
 
@@ -445,7 +627,9 @@
                       </tr>
                     </thead>
                     <tbody id="adminDashboardRecentDeals">
-                      <tr><td colspan="5">Loading recent deals...</td></tr>
+                      <tr>
+                        <td colspan="5">Loading recent deals...</td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
@@ -457,7 +641,11 @@
         <div id="leads" class="section">
           <div class="admin-section-row">
             <h2>All Leads</h2>
-            <button type="button" class="admin-add-lead-btn" id="adminAddLeadBtn">
+            <button
+              type="button"
+              class="admin-add-lead-btn"
+              id="adminAddLeadBtn"
+            >
               <i class="fas fa-plus"></i> Add Client
             </button>
           </div>
@@ -468,7 +656,11 @@
             class="search-box"
             onkeyup="filterTable('leadsTable', 'leadsSearch')"
           />
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>ID</th>
@@ -492,7 +684,11 @@
             class="search-box"
             onkeyup="filterTable('appointmentsTable', 'appointmentsSearch')"
           />
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Company</th>
@@ -515,7 +711,11 @@
             class="search-box"
             onkeyup="filterTable('followupsTable', 'followupsSearch')"
           />
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Company</th>
@@ -539,7 +739,11 @@
             class="search-box"
             onkeyup="filterTable('dealsTable', 'dealsSearch')"
           />
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Company</th>
@@ -562,9 +766,15 @@
             id="notificationsSearch"
             placeholder="Search downsale requests..."
             class="search-box"
-            onkeyup="filterTable('downsaleRequestsTable', 'notificationsSearch')"
+            onkeyup="
+              filterTable('downsaleRequestsTable', 'notificationsSearch')
+            "
           />
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Company</th>
@@ -596,7 +806,11 @@
             onkeyup="filterTable('projectsTable', 'projectsSearch')"
           />
 
-          <table border="1" width="100%" style="border-collapse: collapse; text-align: center">
+          <table
+            border="1"
+            width="100%"
+            style="border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Project Name</th>
@@ -623,9 +837,15 @@
             <div class="project-tracker-header">
               <div>
                 <h3>Project Assignment Tracker</h3>
-                <p>Admin can review assigned, ongoing, and completed service work for every assigned project.</p>
+                <p>
+                  Admin can review assigned, ongoing, and completed service work
+                  for every assigned project.
+                </p>
               </div>
-              <div id="adminProjectTrackerStats" class="project-tracker-stats"></div>
+              <div
+                id="adminProjectTrackerStats"
+                class="project-tracker-stats"
+              ></div>
             </div>
             <div class="project-tracker-toolbar">
               <input
@@ -633,11 +853,18 @@
                 id="adminProjectTrackerSearch"
                 placeholder="Search projects, assignees, services..."
                 class="search-box project-tracker-search"
-                onkeyup="ProjectTrackerUI.filterCards('adminProjectTrackerContainer', 'adminProjectTrackerSearch')"
+                onkeyup="
+                  ProjectTrackerUI.filterCards(
+                    'adminProjectTrackerContainer',
+                    'adminProjectTrackerSearch',
+                  )
+                "
               />
             </div>
             <div id="adminProjectTrackerContainer" class="project-tracker-grid">
-              <div class="project-tracker-empty">Loading project tracker...</div>
+              <div class="project-tracker-empty">
+                Loading project tracker...
+              </div>
             </div>
           </div>
         </div>
@@ -646,10 +873,17 @@
           <div class="attendance-header">
             <div>
               <h2>Attendance</h2>
-              <p class="attendance-admin-subtitle">Review daily attendance, auto absent records, and resolve missing check-outs.</p>
+              <p class="attendance-admin-subtitle">
+                Review daily attendance, auto absent records, and resolve
+                missing check-outs.
+              </p>
             </div>
             <div class="attendance-filters">
-              <input type="date" id="adminAttendanceDate" onchange="loadAdminAttendance()" />
+              <input
+                type="date"
+                id="adminAttendanceDate"
+                onchange="loadAdminAttendance()"
+              />
               <select id="adminAttendanceRole" onchange="loadAdminAttendance()">
                 <option value="">All Roles</option>
                 <option value="tme">TME</option>
@@ -658,7 +892,10 @@
                 <option value="seo">SEO</option>
                 <option value="smo">SMO</option>
               </select>
-              <select id="adminAttendanceStatusFilter" onchange="loadAdminAttendance()">
+              <select
+                id="adminAttendanceStatusFilter"
+                onchange="loadAdminAttendance()"
+              >
                 <option value="">All Status</option>
                 <option value="present">Present</option>
                 <option value="grace">Grace</option>
@@ -667,7 +904,12 @@
                 <option value="checkout_pending">Pending Checkout</option>
                 <option value="absent">Absent</option>
               </select>
-              <button type="button" class="icon-action-btn" onclick="loadAdminAttendance()" title="Refresh attendance">
+              <button
+                type="button"
+                class="icon-action-btn"
+                onclick="loadAdminAttendance()"
+                title="Refresh attendance"
+              >
                 <i class="fas fa-rotate-right"></i>
               </button>
             </div>
@@ -678,11 +920,17 @@
             id="adminAttendanceSearch"
             placeholder="Search attendance..."
             class="search-box"
-            onkeyup="filterTable('adminAttendanceTableBody', 'adminAttendanceSearch')"
+            onkeyup="
+              filterTable('adminAttendanceTableBody', 'adminAttendanceSearch')
+            "
           />
 
           <div class="table-responsive">
-            <table border="1" width="100%" style="border-collapse: collapse; text-align: center;">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
               <thead>
                 <tr>
                   <th>Date</th>
@@ -711,26 +959,44 @@
             <div class="attendance-header attendance-request-header">
               <div>
                 <h3>Offsite Attendance Requests</h3>
-                <p class="attendance-admin-subtitle">Approve meeting-based location requests so employees can check in from client or field locations.</p>
+                <p class="attendance-admin-subtitle">
+                  Approve meeting-based location requests so employees can check
+                  in from client or field locations.
+                </p>
               </div>
               <div class="attendance-filters">
-                <select id="adminAttendanceRequestStatus" onchange="loadAdminAttendanceLocationRequests()">
+                <select
+                  id="adminAttendanceRequestStatus"
+                  onchange="loadAdminAttendanceLocationRequests()"
+                >
                   <option value="">All Requests</option>
                   <option value="pending">Pending</option>
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
-                <button type="button" class="icon-action-btn" onclick="loadAdminAttendanceLocationRequests()" title="Refresh offsite requests">
+                <button
+                  type="button"
+                  class="icon-action-btn"
+                  onclick="loadAdminAttendanceLocationRequests()"
+                  title="Refresh offsite requests"
+                >
                   <i class="fas fa-rotate-right"></i>
                 </button>
               </div>
             </div>
 
-            <div id="adminAttendanceRequestSummary" class="attendance-request-summary"></div>
+            <div
+              id="adminAttendanceRequestSummary"
+              class="attendance-request-summary"
+            ></div>
 
             <div class="table-responsive">
-              <table border="1" width="100%" style="border-collapse: collapse; text-align: center;">
+              <table
+                border="1"
+                width="100%"
+                style="border-collapse: collapse; text-align: center"
+              >
                 <thead>
                   <tr>
                     <th>Requested</th>
@@ -754,22 +1020,72 @@
         </div>
 
         <div id="team" class="section">
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 15px;
+              flex-wrap: wrap;
+            "
+          >
             <h2>Team Members</h2>
             <button type="button" class="add-user-btn" onclick="openUserForm()">
               <i class="fas fa-user-plus"></i> User Registration
             </button>
           </div>
 
-            <div class="role-tabs" style="margin: 20px 0;">
-              <button class="tab-btn active" data-role="all" onclick="filterTeamByRole('all')">All</button>
-              <button class="tab-btn" data-role="hr" onclick="filterTeamByRole('hr')">HR</button>
-              <button class="tab-btn" data-role="tme" onclick="filterTeamByRole('tme')">TME</button>
-              <button class="tab-btn" data-role="me" onclick="filterTeamByRole('me')">ME</button>
-              <button class="tab-btn" data-role="dev" onclick="filterTeamByRole('dev')">DEV</button>
-              <button class="tab-btn" data-role="seo" onclick="filterTeamByRole('seo')">SEO</button>
-            <button class="tab-btn" data-role="smo" onclick="filterTeamByRole('smo')">SMO</button>
-              <button
+          <div class="role-tabs" style="margin: 20px 0">
+            <button
+              class="tab-btn active"
+              data-role="all"
+              onclick="filterTeamByRole('all')"
+            >
+              All
+            </button>
+            <button
+              class="tab-btn"
+              data-role="hr"
+              onclick="filterTeamByRole('hr')"
+            >
+              HR
+            </button>
+            <button
+              class="tab-btn"
+              data-role="tme"
+              onclick="filterTeamByRole('tme')"
+            >
+              TME
+            </button>
+            <button
+              class="tab-btn"
+              data-role="me"
+              onclick="filterTeamByRole('me')"
+            >
+              ME
+            </button>
+            <button
+              class="tab-btn"
+              data-role="dev"
+              onclick="filterTeamByRole('dev')"
+            >
+              DEV
+            </button>
+            <button
+              class="tab-btn"
+              data-role="seo"
+              onclick="filterTeamByRole('seo')"
+            >
+              SEO
+            </button>
+            <button
+              class="tab-btn"
+              data-role="smo"
+              onclick="filterTeamByRole('smo')"
+            >
+              SMO
+            </button>
+            <button
               class="tab-btn"
               data-role="acc"
               onclick="filterTeamByRole('acc')"
@@ -786,7 +1102,15 @@
             onkeyup="filterTable('teamTable', 'teamSearch')"
           />
 
-          <table border="1" width="100%" style="margin-top: 10px; text-align: center; border-collapse: collapse;">
+          <table
+            border="1"
+            width="100%"
+            style="
+              margin-top: 10px;
+              text-align: center;
+              border-collapse: collapse;
+            "
+          >
             <thead>
               <tr>
                 <th>Name</th>
@@ -807,13 +1131,22 @@
           <div data-payroll-scope="admin"></div>
         </div>
 
-        <div id="employeeDetails" class="section" style="display: none;">
-          <button onclick="backToTeam()" class="back-btn" id="employeeDetailsBackBtn">
+        <div id="employeeDetails" class="section" style="display: none">
+          <button
+            onclick="backToTeam()"
+            class="back-btn"
+            id="employeeDetailsBackBtn"
+          >
             <i class="fas fa-arrow-left"></i> Back to Team
           </button>
 
           <div class="emp-card">
-            <img id="empPhoto" class="emp-photo" src="https://dummyimage.com/150x150/0f172a/ffffff&text=USER" alt="Employee profile">
+            <img
+              id="empPhoto"
+              class="emp-photo"
+              src="https://dummyimage.com/150x150/0f172a/ffffff&text=USER"
+              alt="Employee profile"
+            />
             <div>
               <h2 id="empName">Loading...</h2>
               <p id="empEmail">Loading...</p>
@@ -836,7 +1169,7 @@
             </div>
           </div>
 
-          <div id="devPerformance" style="display: none;">
+          <div id="devPerformance" style="display: none">
             <h2>Performance Report</h2>
             <div class="project-stats">
               <div class="project-stat">
@@ -877,7 +1210,10 @@
           <div class="attendance-header">
             <h2 id="attendanceDetailTitle">Attendance</h2>
             <div class="attendance-filters">
-              <select id="attendanceMonth" onchange="updateWeeksAndAttendance()">
+              <select
+                id="attendanceMonth"
+                onchange="updateWeeksAndAttendance()"
+              >
                 <option value="1">January</option>
                 <option value="2">February</option>
                 <option value="3">March</option>
@@ -891,14 +1227,20 @@
                 <option value="11">November</option>
                 <option value="12">December</option>
               </select>
-              <select id="attendanceYear" onchange="updateWeeksAndAttendance()"></select>
+              <select
+                id="attendanceYear"
+                onchange="updateWeeksAndAttendance()"
+              ></select>
               <select id="attendanceWeek" onchange="filterAttendance()">
                 <option value="all">All Weeks</option>
               </select>
             </div>
           </div>
 
-          <table border="1" style="width:100%; border-collapse: collapse; text-align:center;">
+          <table
+            border="1"
+            style="width: 100%; border-collapse: collapse; text-align: center"
+          >
             <thead>
               <tr>
                 <th>Date</th>
@@ -909,13 +1251,22 @@
               </tr>
             </thead>
             <tbody id="attendanceBody">
-              <tr><td colspan="5" style="padding:20px;">Loading...</td></tr>
+              <tr>
+                <td colspan="5" style="padding: 20px">Loading...</td>
+              </tr>
             </tbody>
           </table>
 
-          <h2 style="margin-top: 25px;">Live Location</h2>
+          <h2 style="margin-top: 25px">Live Location</h2>
           <div id="empLocation">Loading location...</div>
-          <a id="mapLink" class="location-btn" target="_blank" rel="noopener" style="display: none;">Open in Google Maps</a>
+          <a
+            id="mapLink"
+            class="location-btn"
+            target="_blank"
+            rel="noopener"
+            style="display: none"
+            >Open in Google Maps</a
+          >
         </div>
       </main>
     </div>
@@ -935,7 +1286,9 @@
         <div class="user-modal-header">
           <div>
             <h2 id="userRegistrationTitle">User Registration</h2>
-            <p id="userRegistrationSubtitle">Create new team members (Admin only)</p>
+            <p id="userRegistrationSubtitle">
+              Create new team members (Admin only)
+            </p>
           </div>
           <button
             type="button"
@@ -949,18 +1302,29 @@
         <div id="userFormBox" class="user-modal-body">
           <div class="form-card user-form-card">
             <div class="right-section user-form-panel">
-              <form id="adminRegisterForm" class="user-profile-form" enctype="multipart/form-data">
+              <form
+                id="adminRegisterForm"
+                class="user-profile-form"
+                enctype="multipart/form-data"
+              >
                 <section class="form-section-card">
                   <div class="form-section-head">
                     <div>
                       <h3 class="form-section-title">Personal Details</h3>
-                      <p class="form-section-note">Basic identity details for the employee profile.</p>
+                      <p class="form-section-note">
+                        Basic identity details for the employee profile.
+                      </p>
                     </div>
                   </div>
                   <div class="grid-2">
                     <div class="input-group">
                       <label>Full Name *</label>
-                      <input type="text" name="name" autocomplete="name" required />
+                      <input
+                        type="text"
+                        name="name"
+                        autocomplete="name"
+                        required
+                      />
                     </div>
                     <div class="input-group">
                       <label>Date of Birth</label>
@@ -973,7 +1337,9 @@
                         <option value="male">Male</option>
                         <option value="female">Female</option>
                         <option value="other">Other</option>
-                        <option value="prefer_not_to_say">Prefer Not To Say</option>
+                        <option value="prefer_not_to_say">
+                          Prefer Not To Say
+                        </option>
                       </select>
                     </div>
                     <div class="input-group">
@@ -987,26 +1353,55 @@
                   <div class="form-section-head">
                     <div>
                       <h3 class="form-section-title">Contact Details</h3>
-                      <p class="form-section-note">Phone, email and residential address used for employee records.</p>
+                      <p class="form-section-note">
+                        Phone, email and residential address used for employee
+                        records.
+                      </p>
                     </div>
                   </div>
                   <div class="grid-2">
                     <div class="input-group">
                       <label>Email *</label>
-                      <input type="email" name="email" autocomplete="username" required />
+                      <input
+                        type="email"
+                        name="email"
+                        autocomplete="username"
+                        required
+                      />
                     </div>
                     <div class="input-group">
                       <label id="userFormPasswordLabel">Password *</label>
-                      <input type="password" name="spswd" id="adminRegisterPassword" placeholder="Enter password" required autocomplete="new-password" />
+                      <input
+                        type="password"
+                        name="spswd"
+                        id="adminRegisterPassword"
+                        placeholder="Enter password"
+                        required
+                        autocomplete="new-password"
+                      />
                     </div>
                     <div class="input-group">
-                      <label id="userFormConfirmPasswordLabel">Confirm Password *</label>
-                      <input type="password" name="cpswd" id="adminRegisterConfirmPassword" placeholder="Re-enter password" required autocomplete="new-password" />
+                      <label id="userFormConfirmPasswordLabel"
+                        >Confirm Password *</label
+                      >
+                      <input
+                        type="password"
+                        name="cpswd"
+                        id="adminRegisterConfirmPassword"
+                        placeholder="Re-enter password"
+                        required
+                        autocomplete="new-password"
+                      />
                       <small id="userPasswordHint" class="hidden"></small>
                     </div>
                     <div class="input-group">
                       <label>Contact *</label>
-                      <input type="tel" name="contact" autocomplete="tel" required />
+                      <input
+                        type="tel"
+                        name="contact"
+                        autocomplete="tel"
+                        required
+                      />
                     </div>
                     <div class="input-group">
                       <label>Family Number</label>
@@ -1014,7 +1409,11 @@
                     </div>
                     <div class="input-group form-full-width">
                       <label>Address</label>
-                      <textarea name="address" rows="4" placeholder="Full residential address"></textarea>
+                      <textarea
+                        name="address"
+                        rows="4"
+                        placeholder="Full residential address"
+                      ></textarea>
                     </div>
                   </div>
                 </section>
@@ -1023,7 +1422,10 @@
                   <div class="form-section-head">
                     <div>
                       <h3 class="form-section-title">Employment Details</h3>
-                      <p class="form-section-note">Role, company and working schedule for internal operations.</p>
+                      <p class="form-section-note">
+                        Role, company and working schedule for internal
+                        operations.
+                      </p>
                     </div>
                   </div>
                   <div class="grid-2">
@@ -1044,21 +1446,39 @@
                       <label>Company *</label>
                       <select name="comp_name" required>
                         <option value="">Select Company</option>
-                        <option value="Metrics Mart Infoline Pvt Ltd">Metrics Mart Infoline Pvt Ltd</option>
+                        <option value="Metrics Mart Infoline Pvt Ltd">
+                          Metrics Mart Infoline Pvt Ltd
+                        </option>
                         <option value="RedSea">RedSea</option>
                       </select>
                     </div>
                     <div class="input-group">
                       <label>Monthly Salary *</label>
-                      <input type="number" name="salary" min="0" step="0.01" required />
+                      <input
+                        type="number"
+                        name="salary"
+                        min="0"
+                        step="0.01"
+                        required
+                      />
                     </div>
                     <div class="input-group">
                       <label>Login Time *</label>
-                      <input type="time" name="login_time" value="10:00" required />
+                      <input
+                        type="time"
+                        name="login_time"
+                        value="10:00"
+                        required
+                      />
                     </div>
                     <div class="input-group">
                       <label>Logout Time *</label>
-                      <input type="time" name="logout_time" value="18:00" required />
+                      <input
+                        type="time"
+                        name="logout_time"
+                        value="18:00"
+                        required
+                      />
                     </div>
                   </div>
                 </section>
@@ -1104,10 +1524,29 @@
           <form id="adminLeadForm" class="admin-lead-form">
             <h3>Basic Information</h3>
             <div class="form-grid">
-              <input type="text" placeholder="Company Name" name="company" required />
-              <input type="text" placeholder="Client Name" name="client" required />
-              <input type="text" placeholder="Contact" name="contact" required />
-              <input type="text" placeholder="Alternate Contact" name="alt_contact" />
+              <input
+                type="text"
+                placeholder="Company Name"
+                name="company"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Client Name"
+                name="client"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Contact"
+                name="contact"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Alternate Contact"
+                name="alt_contact"
+              />
               <input type="text" placeholder="Telephone" name="telephone" />
               <input type="email" placeholder="Email" name="email" />
               <input type="text" placeholder="GST Number" name="gst_no" />
@@ -1115,13 +1554,49 @@
 
             <h3>Full Address</h3>
             <div class="form-grid">
-              <input type="text" placeholder="Flat/Office No" name="flat_no" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="Building Name" name="building_name" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="Locality" name="locality" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="City" name="city" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="Pincode" name="pincode" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="State" name="state" onchange="generateAdminLeadMapLink()" />
-              <input type="text" placeholder="Maps Link (Auto Generated)" name="maps_lnk" id="adminLeadMapsLink" readonly />
+              <input
+                type="text"
+                placeholder="Flat/Office No"
+                name="flat_no"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="Building Name"
+                name="building_name"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="Locality"
+                name="locality"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="City"
+                name="city"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="Pincode"
+                name="pincode"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="State"
+                name="state"
+                onchange="generateAdminLeadMapLink()"
+              />
+              <input
+                type="text"
+                placeholder="Maps Link (Auto Generated)"
+                name="maps_lnk"
+                id="adminLeadMapsLink"
+                readonly
+              />
             </div>
 
             <div class="form-grid">
@@ -1153,52 +1628,110 @@
             <div class="service-item">
               <h4>Web Design &amp; Development</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="web_type[]" value="landing" /> Landing Page</label>
-                <label><input type="checkbox" name="web_type[]" value="static" /> Static Website</label>
-                <label><input type="checkbox" name="web_type[]" value="dynamic" /> Dynamic Website</label>
-                <label><input type="checkbox" name="web_type[]" value="ecommerce" /> Ecommerce Website</label>
+                <label
+                  ><input type="checkbox" name="web_type[]" value="landing" />
+                  Landing Page</label
+                >
+                <label
+                  ><input type="checkbox" name="web_type[]" value="static" />
+                  Static Website</label
+                >
+                <label
+                  ><input type="checkbox" name="web_type[]" value="dynamic" />
+                  Dynamic Website</label
+                >
+                <label
+                  ><input type="checkbox" name="web_type[]" value="ecommerce" />
+                  Ecommerce Website</label
+                >
               </div>
 
               <h4>SEO</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="seo_type[]" value="gmb" /> GMB SEO</label>
-                <label><input type="checkbox" name="seo_type[]" value="web" /> Web SEO</label>
+                <label
+                  ><input type="checkbox" name="seo_type[]" value="gmb" /> GMB
+                  SEO</label
+                >
+                <label
+                  ><input type="checkbox" name="seo_type[]" value="web" /> Web
+                  SEO</label
+                >
               </div>
 
               <h4>SMO</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="smo_type[]" value="facebook" /> Facebook</label>
-                <label><input type="checkbox" name="smo_type[]" value="instagram" /> Instagram</label>
-                <label><input type="checkbox" name="smo_type[]" value="linkedin" /> LinkedIn</label>
-                <label><input type="checkbox" name="smo_type[]" value="twitter" /> Twitter</label>
+                <label
+                  ><input type="checkbox" name="smo_type[]" value="facebook" />
+                  Facebook</label
+                >
+                <label
+                  ><input type="checkbox" name="smo_type[]" value="instagram" />
+                  Instagram</label
+                >
+                <label
+                  ><input type="checkbox" name="smo_type[]" value="linkedin" />
+                  LinkedIn</label
+                >
+                <label
+                  ><input type="checkbox" name="smo_type[]" value="twitter" />
+                  Twitter</label
+                >
               </div>
 
               <h4>Google Ads</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="services[]" value="ads" /> Google Ads</label>
+                <label
+                  ><input type="checkbox" name="services[]" value="ads" />
+                  Google Ads</label
+                >
               </div>
 
               <h4>Application</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="app_type[]" value="android" /> Android</label>
-                <label><input type="checkbox" name="app_type[]" value="ios" /> iOS</label>
+                <label
+                  ><input type="checkbox" name="app_type[]" value="android" />
+                  Android</label
+                >
+                <label
+                  ><input type="checkbox" name="app_type[]" value="ios" />
+                  iOS</label
+                >
               </div>
 
               <h4>ERP/CRM/Software</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="erp_type[]" value="react" /> React</label>
-                <label><input type="checkbox" name="erp_type[]" value="next" /> Next.js</label>
-                <label><input type="checkbox" name="erp_type[]" value="php" /> PHP</label>
-                <label><input type="checkbox" name="erp_type[]" value="node" /> Node + Express</label>
+                <label
+                  ><input type="checkbox" name="erp_type[]" value="react" />
+                  React</label
+                >
+                <label
+                  ><input type="checkbox" name="erp_type[]" value="next" />
+                  Next.js</label
+                >
+                <label
+                  ><input type="checkbox" name="erp_type[]" value="php" />
+                  PHP</label
+                >
+                <label
+                  ><input type="checkbox" name="erp_type[]" value="node" /> Node
+                  + Express</label
+                >
               </div>
 
               <h4>Other Services</h4>
               <div class="checkbox-group">
-                <label><input type="checkbox" name="services[]" value="Other" /> Other</label>
+                <label
+                  ><input type="checkbox" name="services[]" value="Other" />
+                  Other</label
+                >
               </div>
 
               <div class="admin-lead-service-notes">
-                <textarea name="service_notes" rows="3" placeholder="Any specific requirements or notes about selected services..."></textarea>
+                <textarea
+                  name="service_notes"
+                  rows="3"
+                  placeholder="Any specific requirements or notes about selected services..."
+                ></textarea>
               </div>
             </div>
 
@@ -1216,27 +1749,61 @@
                 <select name="assign_emp" id="adminLeadAssignEmp">
                   <option value="">Select Employee</option>
                 </select>
-                <input type="text" placeholder="Location (Auto from Address)" name="location" id="adminLeadLocation" />
+                <input
+                  type="text"
+                  placeholder="Location (Auto from Address)"
+                  name="location"
+                  id="adminLeadLocation"
+                />
               </div>
             </div>
 
-            <div id="adminLeadFollowupSection" class="admin-lead-subsection hidden">
+            <div
+              id="adminLeadFollowupSection"
+              class="admin-lead-subsection hidden"
+            >
               <h3>Follow Up Details</h3>
               <div class="form-grid">
-                <input type="date" name="follow_date" id="adminLeadFollowDate" />
-                <input type="time" name="follow_time" id="adminLeadFollowTime" />
-                <input type="text" placeholder="Reason" name="reason" id="adminLeadReason" class="admin-lead-full-width" />
+                <input
+                  type="date"
+                  name="follow_date"
+                  id="adminLeadFollowDate"
+                />
+                <input
+                  type="time"
+                  name="follow_time"
+                  id="adminLeadFollowTime"
+                />
+                <input
+                  type="text"
+                  placeholder="Reason"
+                  name="reason"
+                  id="adminLeadReason"
+                  class="admin-lead-full-width"
+                />
               </div>
             </div>
 
             <h3>Additional Notes</h3>
-            <textarea name="additional_notes" rows="8" placeholder="Any additional notes about the lead..."></textarea>
+            <textarea
+              name="additional_notes"
+              rows="8"
+              placeholder="Any additional notes about the lead..."
+            ></textarea>
 
             <div class="btn-group admin-lead-actions">
-              <button type="submit" class="submit-btn save-btn" id="adminLeadSubmitBtn">
+              <button
+                type="submit"
+                class="submit-btn save-btn"
+                id="adminLeadSubmitBtn"
+              >
                 Add Client
               </button>
-              <button type="button" class="cancel-btn" onclick="closeAdminLeadForm()">
+              <button
+                type="button"
+                class="cancel-btn"
+                onclick="closeAdminLeadForm()"
+              >
                 Cancel
               </button>
             </div>
