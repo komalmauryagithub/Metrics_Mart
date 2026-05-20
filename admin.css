@@ -891,7 +891,7 @@ tbody tr:nth-child(even) {
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 1000;
+    z-index: 2400;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
@@ -926,6 +926,38 @@ tbody tr:nth-child(even) {
 .popup-content p {
     color: #475569;
     font-size: 16px;
+}
+
+.popup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.popup-action-btn {
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 14px;
+}
+
+.popup-action-btn.primary {
+    background: var(--admin-accent);
+    color: #ffffff;
+}
+
+.popup-action-btn.secondary {
+    background: #e2e8f0;
+    color: #334155;
+}
+
+.popup-action-btn:disabled {
+    cursor: wait;
+    opacity: 0.7;
 }
 
 /* Projects Table Specific */
