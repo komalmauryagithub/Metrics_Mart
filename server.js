@@ -1106,18 +1106,71 @@ function escapeProfileSetupEmailHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function getProfileSetupFormSections() {
+  return [
+    {
+      title: "Identity & KYC",
+      fields: ["Profile image", "Aadhar image", "Aadhar number", "PAN number", "PAN image"],
+    },
+    {
+      title: "Bank Details",
+      fields: ["Bank name", "Account number", "IFSC code", "Beneficiary name", "Cancelled cheque image"],
+    },
+    {
+      title: "Joining & Documents",
+      fields: ["Joining date", "Total experience", "Experience letter", "Resume", "Certification file"],
+    },
+    {
+      title: "PF Details",
+      fields: ["PF enabled", "PF number", "UAN number", "Employee PF amount", "Employer PF amount", "PF joining date"],
+    },
+    {
+      title: "Skills",
+      fields: ["Work skills"],
+    },
+  ];
+}
+
+function buildProfileSetupFormSectionsHtml() {
+  return getProfileSetupFormSections()
+    .map(
+      (section) => `
+        <div style="border:1px solid #dbe8ec;border-radius:14px;padding:14px;background:#f8fbfc;">
+          <h3 style="margin:0 0 10px;font-size:15px;color:#0f766e;">${escapeProfileSetupEmailHtml(section.title)}</h3>
+          <ul style="margin:0;padding-left:18px;color:#475569;">
+            ${section.fields
+              .map((field) => `<li>${escapeProfileSetupEmailHtml(field)}</li>`)
+              .join("")}
+          </ul>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function buildProfileSetupFormSectionsText() {
+  return getProfileSetupFormSections()
+    .map((section) => `${section.title}: ${section.fields.join(", ")}`)
+    .join("\n");
+}
+
 function buildProfileSetupInviteHtml(profileSetup, user) {
   const userName = String(user?.name || "Team Member").trim() || "Team Member";
   const invitationLink = String(profileSetup?.invitationLink || "").trim();
   const expiresOn = String(profileSetup?.expiresOn || "").trim();
 
   return `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:640px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 16px;color:#0f172a;">Complete Your Metrics Mart Profile</h2>
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:720px;margin:0 auto;padding:24px;background:#f1f8f8;">
+      <div style="background:#ffffff;border:1px solid #dbe8ec;border-radius:18px;padding:24px;">
+      <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0f766e;">Metrics Mart</p>
+      <h2 style="margin:0 0 16px;color:#0f172a;">Complete Your Employee Profile</h2>
       <p style="margin:0 0 12px;">Hi ${escapeProfileSetupEmailHtml(userName)},</p>
       <p style="margin:0 0 16px;">
-        Please complete your remaining employee details using the link below.
+        Please complete your remaining employee details using the link below. Keep the required documents ready before you start.
       </p>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 20px;">
+        ${buildProfileSetupFormSectionsHtml()}
+      </div>
       <p style="margin:0 0 20px;">
         <a
           href="${escapeProfileSetupEmailHtml(invitationLink)}"
@@ -1135,6 +1188,7 @@ function buildProfileSetupInviteHtml(profileSetup, user) {
           : ""
       }
       <p style="margin:0;">Regards,<br />Metrics Mart Admin</p>
+      </div>
     </div>
   `;
 }
@@ -1148,6 +1202,9 @@ function buildProfileSetupInvitePayload(req, user, token, expiresAt) {
     "",
     "Please complete your remaining employee details using the link below:",
     invitationLink,
+    "",
+    "Details required in the form:",
+    buildProfileSetupFormSectionsText(),
     "",
     expiresOn ? `This link expires on ${expiresOn}.` : "",
     "",
@@ -1215,6 +1272,284 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
   }
 }
 
+function normalizeProfileSetupEmailValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function formatProfileSetupEmailValue(value, fallback = "-") {
+  if (value == null) return fallback;
+  const normalized = String(value).trim();
+  return normalized || fallback;
+}
+
+function formatProfileSetupAmount(value) {
+  if (value == null || value === "") return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return formatProfileSetupEmailValue(value);
+  return `Rs. ${amount.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatProfileSetupSkills(value) {
+  const labels = {
+    web: "Web",
+    seo: "SEO",
+    smo: "SMO",
+    ads: "Ads",
+    app: "App",
+    erp_crm: "ERP/CRM",
+  };
+  let sourceValue = value;
+
+  if (typeof sourceValue === "string") {
+    const trimmed = sourceValue.trim();
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        sourceValue = JSON.parse(trimmed);
+      } catch (_err) {
+        sourceValue = value;
+      }
+    }
+  }
+
+  const skills = parseProfileSkillsInput(sourceValue);
+  return skills.length
+    ? skills.map((skill) => labels[skill] || skill).join(", ")
+    : "-";
+}
+
+function normalizeProfileSetupFilePath(filePath) {
+  return String(filePath || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+}
+
+function buildProfileSetupFileUrl(req, filePath) {
+  const normalizedPath = normalizeProfileSetupFilePath(filePath);
+  if (!normalizedPath) return "";
+  if (/^https?:\/\//i.test(normalizedPath)) return normalizedPath;
+  return `${resolveAppBaseUrl(req)}/${normalizedPath}`;
+}
+
+function buildProfileSetupDetailRowsHtml(rows) {
+  return rows
+    .map(
+      (row) => `
+        <tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#64748b;font-size:13px;width:38%;">${escapeProfileSetupEmailHtml(row.label)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;font-weight:600;">${row.html || escapeProfileSetupEmailHtml(formatProfileSetupEmailValue(row.value))}</td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+function buildProfileSetupSectionHtml(title, rows) {
+  return `
+    <h3 style="margin:22px 0 8px;color:#0f766e;font-size:16px;">${escapeProfileSetupEmailHtml(title)}</h3>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#ffffff;">
+      <tbody>${buildProfileSetupDetailRowsHtml(rows)}</tbody>
+    </table>
+  `;
+}
+
+function buildProfileSetupDocumentRows(req, profile) {
+  return [
+    ["Profile image", profile.prof_img],
+    ["Aadhar image", profile.aadhar_img],
+    ["PAN image", profile.pan_img],
+    ["Cancelled cheque image", profile.cancelled_cheque],
+    ["Resume", profile.resume_file],
+    ["Experience letter", profile.experience_file],
+    ["Certification file", profile.certification_file],
+  ].map(([label, filePath]) => {
+    const fileUrl = buildProfileSetupFileUrl(req, filePath);
+    return {
+      label,
+      value: filePath ? filePath : "-",
+      url: fileUrl,
+      html: fileUrl
+        ? `<a href="${escapeProfileSetupEmailHtml(fileUrl)}" style="color:#0f766e;text-decoration:none;font-weight:700;">Open file</a><span style="color:#64748b;font-weight:400;"> - ${escapeProfileSetupEmailHtml(normalizeProfileSetupFilePath(filePath))}</span>`
+        : "-",
+    };
+  });
+}
+
+function buildProfileSetupCompletionHtml(req, profile) {
+  const userName = formatProfileSetupEmailValue(profile.name, "Employee");
+  const completedAt = formatProfileSetupExpiryLabel(new Date());
+  const pfEnabled = Number(profile.pf_enabled || 0) ? "Yes" : "No";
+
+  return `
+    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#111827;max-width:760px;margin:0 auto;padding:24px;background:#f1f8f8;">
+      <div style="background:#ffffff;border:1px solid #dbe8ec;border-radius:18px;padding:24px;">
+        <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0f766e;">Profile Submitted</p>
+        <h2 style="margin:0 0 10px;color:#0f172a;">${escapeProfileSetupEmailHtml(userName)} completed the employee profile form</h2>
+        <p style="margin:0 0 18px;color:#475569;">Submitted on ${escapeProfileSetupEmailHtml(completedAt)}. The details below are ready for admin and HR review.</p>
+
+        ${buildProfileSetupSectionHtml("Employee", [
+          { label: "Name", value: profile.name },
+          { label: "Email", value: profile.email },
+          { label: "Contact", value: profile.contact },
+          { label: "Role", value: String(profile.role || "").toUpperCase() },
+          { label: "Company", value: profile.comp_name },
+        ])}
+
+        ${buildProfileSetupSectionHtml("Identity & KYC", [
+          { label: "Aadhar number", value: profile.aadhar_no },
+          { label: "PAN number", value: profile.pan_number || "-" },
+        ])}
+
+        ${buildProfileSetupSectionHtml("Bank Details", [
+          { label: "Bank name", value: profile.bank_name },
+          { label: "Account number", value: profile.account_no },
+          { label: "IFSC code", value: profile.ifsc_code },
+          { label: "Beneficiary name", value: profile.beneficiary_name },
+        ])}
+
+        ${buildProfileSetupSectionHtml("Joining & Experience", [
+          { label: "Joining date", value: profile.joining_date },
+          { label: "Total experience", value: profile.total_experience },
+          { label: "Skills", value: formatProfileSetupSkills(profile.skills) },
+        ])}
+
+        ${buildProfileSetupSectionHtml("PF Details", [
+          { label: "PF enabled", value: pfEnabled },
+          { label: "PF number", value: Number(profile.pf_enabled || 0) ? profile.pf_number : "-" },
+          { label: "UAN number", value: Number(profile.pf_enabled || 0) ? profile.uan_number : "-" },
+          { label: "Employee PF amount", value: Number(profile.pf_enabled || 0) ? formatProfileSetupAmount(profile.employee_pf_amount) : "-" },
+          { label: "Employer PF amount", value: Number(profile.pf_enabled || 0) ? formatProfileSetupAmount(profile.employer_pf_amount) : "-" },
+          { label: "PF joining date", value: Number(profile.pf_enabled || 0) ? profile.pf_joining_date : "-" },
+        ])}
+
+        ${buildProfileSetupSectionHtml("Uploaded Documents", buildProfileSetupDocumentRows(req, profile))}
+      </div>
+    </div>
+  `;
+}
+
+function buildProfileSetupCompletionText(req, profile) {
+  const documentLines = buildProfileSetupDocumentRows(req, profile).map(
+    (row) => `${row.label}: ${row.url || "-"}`,
+  );
+
+  return [
+    `${formatProfileSetupEmailValue(profile.name, "Employee")} completed the employee profile form.`,
+    "",
+    `Name: ${formatProfileSetupEmailValue(profile.name)}`,
+    `Email: ${formatProfileSetupEmailValue(profile.email)}`,
+    `Contact: ${formatProfileSetupEmailValue(profile.contact)}`,
+    `Role: ${formatProfileSetupEmailValue(String(profile.role || "").toUpperCase())}`,
+    `Company: ${formatProfileSetupEmailValue(profile.comp_name)}`,
+    "",
+    `Aadhar number: ${formatProfileSetupEmailValue(profile.aadhar_no)}`,
+    `PAN number: ${formatProfileSetupEmailValue(profile.pan_number)}`,
+    `Bank name: ${formatProfileSetupEmailValue(profile.bank_name)}`,
+    `Account number: ${formatProfileSetupEmailValue(profile.account_no)}`,
+    `IFSC code: ${formatProfileSetupEmailValue(profile.ifsc_code)}`,
+    `Beneficiary name: ${formatProfileSetupEmailValue(profile.beneficiary_name)}`,
+    `Joining date: ${formatProfileSetupEmailValue(profile.joining_date)}`,
+    `Total experience: ${formatProfileSetupEmailValue(profile.total_experience)}`,
+    `Skills: ${formatProfileSetupSkills(profile.skills)}`,
+    `PF enabled: ${Number(profile.pf_enabled || 0) ? "Yes" : "No"}`,
+    Number(profile.pf_enabled || 0)
+      ? `PF number: ${formatProfileSetupEmailValue(profile.pf_number)}`
+      : "",
+    Number(profile.pf_enabled || 0)
+      ? `UAN number: ${formatProfileSetupEmailValue(profile.uan_number)}`
+      : "",
+    Number(profile.pf_enabled || 0)
+      ? `Employee PF amount: ${formatProfileSetupAmount(profile.employee_pf_amount)}`
+      : "",
+    Number(profile.pf_enabled || 0)
+      ? `Employer PF amount: ${formatProfileSetupAmount(profile.employer_pf_amount)}`
+      : "",
+    Number(profile.pf_enabled || 0)
+      ? `PF joining date: ${formatProfileSetupEmailValue(profile.pf_joining_date)}`
+      : "",
+    "",
+    "Uploaded documents:",
+    ...documentLines,
+  ].filter((line) => line !== "").join("\n");
+}
+
+async function getProfileSetupCompletionRecipients(submittedUserId) {
+  const configuredRecipients = String(
+    process.env.PROFILE_SETUP_NOTIFY_EMAILS || process.env.HR_NOTIFY_EMAILS || "",
+  )
+    .split(",")
+    .map(normalizeProfileSetupEmailValue)
+    .filter(Boolean);
+
+  const [rows] = await dbPromise.query(
+    `
+      SELECT email
+      FROM users
+      WHERE id <> ?
+        AND LOWER(TRIM(COALESCE(role, ''))) IN ('admin', 'hr')
+        AND TRIM(COALESCE(email, '')) <> ''
+    `,
+    [Number(submittedUserId || 0)],
+  );
+
+  return [
+    ...new Set(
+      rows
+        .map((row) => normalizeProfileSetupEmailValue(row.email))
+        .concat(configuredRecipients)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+async function sendProfileSetupCompletionEmail(req, profile) {
+  const recipients = await getProfileSetupCompletionRecipients(profile?.id);
+  if (!recipients.length) {
+    return {
+      sent: false,
+      status: "skipped",
+      message: "No admin or HR email recipients were found.",
+    };
+  }
+
+  const mailer = getProfileInviteMailerTransport();
+  if (!mailer.configured || !mailer.transport) {
+    return {
+      sent: false,
+      status: "skipped",
+      message: mailer.reason || "Automatic email is not configured on the server yet.",
+      missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
+    };
+  }
+
+  try {
+    await mailer.transport.sendMail({
+      from: mailer.from,
+      to: recipients,
+      subject: `Employee profile submitted: ${formatProfileSetupEmailValue(profile?.name, "Employee")}`,
+      text: buildProfileSetupCompletionText(req, profile),
+      html: buildProfileSetupCompletionHtml(req, profile),
+    });
+
+    return {
+      sent: true,
+      status: "sent",
+      message: `Profile submission email sent to admin/HR (${recipients.join(", ")}).`,
+      recipients,
+    };
+  } catch (err) {
+    console.error("Profile setup completion email send failed:", err);
+    return {
+      sent: false,
+      status: "failed",
+      message: "Profile submission email failed. Please check SMTP settings.",
+    };
+  }
+}
+
 async function issueProfileSetupInvite(req, userId, email, name) {
   const { token, tokenHash, expiresAt } = generateProfileSetupTokenData();
 
@@ -1254,6 +1589,7 @@ async function issueProfileSetupInvite(req, userId, email, name) {
     emailDispatch,
   };
 }
+
 function buildPasswordResetEmailHtml(resetRequest, user) {
   const userName = String(user?.name || "Team Member").trim() || "Team Member";
   const resetLink = String(resetRequest?.resetLink || "").trim();
@@ -4016,7 +4352,7 @@ const ATTENDANCE_OFFICE_LOCATION = {
     "Riddhi Siddhi Complex, E-107, Swami Vivekananda Rd, opposite Patkar College, Unnat Nagar, Goregaon West, Mumbai, Maharashtra 400104",
 };
 const ATTENDANCE_GPS_ACCURACY_BUFFER_METERS = Number(
-  process.env.ATTENDANCE_GPS_ACCURACY_BUFFER_METERS || 25,
+  process.env.ATTENDANCE_GPS_ACCURACY_BUFFER_METERS || 100,
 );
 const ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS = Number(
   process.env.ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS || 150,
@@ -4368,7 +4704,7 @@ async function validateAttendanceAccessLocation({
     }
 
     const error = new Error(
-      `Admin ne ${approvedZone.address} ke around ${approvedZone.radiusMeters}m offsite approval diya hua hai. Current distance lagbhag ${Math.round(approvedMatch.distanceMeters)}m hai.`,
+      `Admin has approved attendance within ${approvedZone.radiusMeters}m of ${approvedZone.address}. Your current distance is about ${Math.round(approvedMatch.distanceMeters)}m.`,
     );
     error.statusCode = 400;
     throw error;
@@ -4381,7 +4717,7 @@ async function validateAttendanceAccessLocation({
         ? activeRequest.adminRemark
           ? ` Admin note: ${activeRequest.adminRemark}`
           : " Your latest offsite request was rejected."
-        : " Agar aap meeting par ho to offsite location request admin ko bhejo.";
+        : " Send an offsite location request to admin if you are at a meeting location.";
 
   const error = new Error(
     `Check-in / check-out only works within ${ATTENDANCE_OFFICE_LOCATION.radiusMeters}m of ${ATTENDANCE_OFFICE_LOCATION.address}.${approvalHint}`,
@@ -5417,9 +5753,49 @@ app.post("/api/profile-setup/:token", (req, res) => {
         ],
       );
 
+      const submittedProfile = {
+        ...user,
+        prof_img: profImg,
+        aadhar_no: aadharNo,
+        aadhar_img: aadharImg,
+        pan_number: panNumber,
+        pan_img: panImg,
+        account_no: accountNo,
+        bank_name: bankName,
+        ifsc_code: ifscCode,
+        beneficiary_name: beneficiaryName,
+        cancelled_cheque: cancelledCheque,
+        joining_date: joiningDate,
+        total_experience: totalExperience,
+        pf_enabled: pfEnabled,
+        pf_number: pfEnabled ? pfNumber : null,
+        uan_number: pfEnabled ? uanNumber : null,
+        employee_pf_amount: pfEnabled ? employeePfAmount : null,
+        employer_pf_amount: pfEnabled ? employerPfAmount : null,
+        pf_joining_date: pfEnabled ? pfJoiningDate : null,
+        resume_file: resumeFile,
+        experience_file: experienceFile,
+        certification_file: certificationFile,
+        skills: JSON.stringify(skills),
+      };
+      const notificationDispatch = await sendProfileSetupCompletionEmail(
+        req,
+        submittedProfile,
+      ).catch((emailErr) => {
+        console.error("Profile setup completion notification failed:", emailErr);
+        return {
+          sent: false,
+          status: "failed",
+          message: "Profile submission email failed. Please check SMTP settings.",
+        };
+      });
+
       res.json({
         success: true,
-        message: "Profile details submitted successfully",
+        message: notificationDispatch?.sent
+          ? "Profile details submitted successfully. Admin and HR have been notified."
+          : "Profile details submitted successfully",
+        notificationDispatch,
       });
     } catch (err) {
       console.error("Profile Setup Submit Error:", err);
