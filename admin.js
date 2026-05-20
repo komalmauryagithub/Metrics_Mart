@@ -6,6 +6,7 @@ let adminDashboardChart = null;
 let adminLeadsOverviewChart = null;
 let adminLeadSourceChart = null;
 let adminLeadSubmitting = false;
+let adminPopupTimer = null;
 let userFormMode = "create";
 let editingUserId = null;
 const adminChartInstances = {};
@@ -779,14 +780,33 @@ function refreshAdminDashboardView() {
 }
 
 // Popup
-function showPopup(title, message, isSuccess) {
+function showPopup(title, message, isSuccess, options = {}) {
     const popup = document.getElementById('popup');
     const icon = document.getElementById('popupIcon');
     const titleEl = document.getElementById('popupTitle');
     const msgEl = document.getElementById('popupMessage');
+    const actionsEl = document.getElementById("popupActions");
 
     titleEl.textContent = title;
     msgEl.textContent = message;
+    if (adminPopupTimer) {
+        clearTimeout(adminPopupTimer);
+        adminPopupTimer = null;
+    }
+
+    if (actionsEl) {
+        actionsEl.innerHTML = "";
+        const actions = Array.isArray(options.actions) ? options.actions : [];
+        actionsEl.classList.toggle("hidden", actions.length === 0);
+        actions.forEach((action) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `popup-action-btn ${action.variant || "secondary"}`;
+            button.textContent = action.label || "Action";
+            button.addEventListener("click", () => action.onClick?.(button));
+            actionsEl.appendChild(button);
+        });
+    }
 
     // 🔥 ICON FIX
     if (isSuccess) {
@@ -800,9 +820,20 @@ function showPopup(title, message, isSuccess) {
     popup.classList.remove('hidden');
 
     // 🔥 Auto close after 1.5 sec
-    setTimeout(() => {
-        popup.classList.add('hidden');
-    }, 1500);
+    if (options.autoClose !== false) {
+        adminPopupTimer = setTimeout(() => {
+            popup.classList.add('hidden');
+        }, options.autoCloseMs || 1500);
+    }
+}
+
+function hidePopup() {
+    const popup = document.getElementById("popup");
+    if (adminPopupTimer) {
+        clearTimeout(adminPopupTimer);
+        adminPopupTimer = null;
+    }
+    popup?.classList.add("hidden");
 }
 
 async function copyTextToClipboard(text) {
@@ -848,23 +879,125 @@ async function handleProfileSetupInvite(profileSetup) {
     const emailMessage = !emailSent && requiredConfig.length
         ? `${baseEmailMessage || "Automatic profile setup email could not be sent."} Configure ${requiredConfig.join(", ")} in the server .env file to enable auto email.`
         : baseEmailMessage;
-    let copied = false;
-
-    if (!emailSent && invitationLink) {
-        copied = await copyTextToClipboard(invitationLink);
-    }
-
-    if (!emailSent && !copied && invitationLink) {
-        window.prompt("Copy this profile completion link", invitationLink);
-    }
-
     return {
-        copied,
+        copied: false,
         emailSent,
         emailMessage,
         invitationLink,
         requiredConfig,
     };
+}
+
+function openProfileSetupDraft(profileSetup) {
+    const gmailComposeUrl = String(profileSetup?.gmailComposeUrl || "").trim();
+    const mailtoUrl = String(profileSetup?.mailtoUrl || "").trim();
+    const url = gmailComposeUrl || mailtoUrl;
+    if (!url) return false;
+    window.open(url, "_blank", "noopener,noreferrer");
+    return true;
+}
+
+async function resendProfileSetupEmail(userId, profileSetup, button = null) {
+    const normalizedUserId = Number(userId || 0);
+    if (!normalizedUserId) {
+        showPopup("Profile Email", "User was created, but user id is missing for email resend.", false, { autoClose: false });
+        return;
+    }
+
+    const originalLabel = button?.textContent || "";
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Sending...";
+    }
+
+    try {
+        const response = await fetch(`${BASE_URL}/api/admin/users/${normalizedUserId}/profile-setup-link`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requireEmail: true }),
+        });
+        const result = await response.json().catch(() => ({}));
+        const nextProfileSetup = result.profileSetup || profileSetup || {};
+        const emailDispatch = result.emailDispatch || nextProfileSetup.emailDispatch || {};
+
+        if (!response.ok || !result.success || !emailDispatch.sent) {
+            throw new Error(
+                result.message ||
+                emailDispatch.message ||
+                "Profile setup email could not be sent. Please check SMTP settings.",
+            );
+        }
+
+        showPopup(
+            "Profile Email Sent",
+            emailDispatch.message || "Profile setup email sent successfully.",
+            true,
+        );
+    } catch (error) {
+        const fallbackActions = [];
+        if (profileSetup?.gmailComposeUrl || profileSetup?.mailtoUrl) {
+            fallbackActions.push({
+                label: "Open Email Draft",
+                variant: "primary",
+                onClick: () => openProfileSetupDraft(profileSetup),
+            });
+        }
+        fallbackActions.push({
+            label: "Close",
+            variant: "secondary",
+            onClick: hidePopup,
+        });
+        showPopup(
+            "Email Not Sent",
+            error.message || "Profile setup email could not be sent. Please check SMTP settings.",
+            false,
+            { autoClose: false, actions: fallbackActions },
+        );
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalLabel || "Send Profile Link by Email";
+        }
+    }
+}
+
+function showProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
+    const message = inviteResult.emailMessage ||
+        "User created successfully. The profile setup email was not sent automatically.";
+
+    showPopup(
+        "Send Profile Form",
+        `${message} Click below to email the second form link to the employee.`,
+        false,
+        {
+            autoClose: false,
+            actions: [
+                {
+                    label: "Send Profile Link by Email",
+                    variant: "primary",
+                    onClick: (button) => resendProfileSetupEmail(userId, profileSetup, button),
+                },
+                {
+                    label: "Copy Link",
+                    variant: "secondary",
+                    onClick: async () => {
+                        const copied = await copyTextToClipboard(profileSetup?.invitationLink || "");
+                        showPopup(
+                            copied ? "Link Copied" : "Profile Link",
+                            copied ? "Profile setup link copied." : profileSetup?.invitationLink || "Profile link unavailable.",
+                            copied,
+                            { autoClose: copied ? undefined : false },
+                        );
+                    },
+                },
+                {
+                    label: "Close",
+                    variant: "secondary",
+                    onClick: hidePopup,
+                },
+            ],
+        },
+    );
 }
 
 async function loadLeads() {
@@ -3900,14 +4033,18 @@ if (adminRegisterForm) {
                         : inviteResult?.copied
                             ? `User created successfully. ${inviteResult?.emailMessage || "Automatic profile setup email could not be sent."} Profile link copied for manual sharing.`
                             : `User created successfully. ${inviteResult?.emailMessage || "Automatic profile setup email could not be sent."}`;
-                showPopup(
-                    popupTitle,
-                    isEditMode ? (data.message || successMessage) : successMessage,
-                    true,
-                );
                 this.reset();
                 closeUserForm();
                 loadTeam();
+                if (!isEditMode && inviteResult && !inviteResult.emailSent) {
+                    showProfileSetupEmailPrompt(data.userId, data.profileSetup, inviteResult);
+                } else {
+                    showPopup(
+                        popupTitle,
+                        isEditMode ? (data.message || successMessage) : successMessage,
+                        true,
+                    );
+                }
             } else {
                 console.error("User save failed:", res.status, data);
                 showPopup("Error", data.message || `Request failed (${res.status})`, false);
