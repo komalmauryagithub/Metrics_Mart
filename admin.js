@@ -1692,6 +1692,252 @@ function renderTeamPresenceBadge(user = {}) {
     return `<span class="team-presence-badge available"><i class="fas fa-circle-check"></i> Available</span>`;
 }
 
+function formatAdminProfileValue(value, fallback = "-") {
+    if (value === null || value === undefined) return fallback;
+    const normalized = String(value).trim();
+    return normalized || fallback;
+}
+
+function formatAdminProfileLabel(value, fallback = "-") {
+    const normalized = formatAdminProfileValue(value, "");
+    if (!normalized) return fallback;
+
+    return normalized
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatAdminProfileDateValue(value) {
+    if (!value) return "-";
+    return formatDate(value);
+}
+
+function formatAdminProfileDateTimeValue(value) {
+    if (!value) return "-";
+    const date = new Date(String(value).replace(" ", "T"));
+    if (Number.isNaN(date.getTime())) return formatAdminProfileValue(value);
+
+    return date.toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function formatAdminProfileAmount(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return formatAdminProfileValue(value);
+
+    return `Rs. ${amount.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
+}
+
+function getAdminProfileFileUrl(filePath) {
+    const normalized = String(filePath || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!normalized) return "";
+    if (/^https?:\/\//i.test(normalized)) return normalized;
+    return `${BASE_URL}/${normalized}`;
+}
+
+function isAdminProfileImageFile(filePath) {
+    return /\.(jpg|jpeg|png|gif|webp)$/i.test(String(filePath || "").split("?")[0]);
+}
+
+function parseAdminProfileSkills(value) {
+    const skillLabels = {
+        web: "Web",
+        seo: "SEO",
+        smo: "SMO",
+        ads: "Ads",
+        app: "App",
+        erp: "ERP",
+        erp_crm: "ERP/CRM",
+    };
+    const parsed = parseMaybeJson(value);
+    const rawSkills = Array.isArray(parsed)
+        ? parsed
+        : String(parsed || "")
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean);
+
+    return rawSkills
+        .map((skill) => skillLabels[String(skill || "").toLowerCase().trim()] || formatAdminProfileLabel(skill, ""))
+        .filter(Boolean)
+        .join(", ") || "-";
+}
+
+function renderAdminProfileFields(rows) {
+    return rows
+        .map((row) => `
+            <div class="profile-field">
+                <span>${escapeAdminHtml(row.label)}</span>
+                <strong>${row.html || escapeAdminHtml(formatAdminProfileValue(row.value))}</strong>
+            </div>
+        `)
+        .join("");
+}
+
+function renderAdminProfileSection(title, rows) {
+    return `
+        <section class="profile-detail-section">
+            <h3>${escapeAdminHtml(title)}</h3>
+            <div class="profile-field-grid">
+                ${renderAdminProfileFields(rows)}
+            </div>
+        </section>
+    `;
+}
+
+function renderAdminProfileFileCard(label, filePath) {
+    const fileUrl = getAdminProfileFileUrl(filePath);
+    if (!fileUrl) {
+        return `
+            <div class="profile-file-card missing">
+                <span>${escapeAdminHtml(label)}</span>
+                <strong>Not uploaded</strong>
+            </div>
+        `;
+    }
+
+    const normalizedPath = String(filePath || "").replace(/\\/g, "/");
+    const preview = isAdminProfileImageFile(normalizedPath)
+        ? `<img src="${escapeAdminHtml(fileUrl)}" alt="${escapeAdminHtml(label)}" loading="lazy" />`
+        : `<div class="profile-file-icon"><i class="fas fa-file-lines"></i></div>`;
+
+    return `
+        <div class="profile-file-card">
+            ${preview}
+            <div>
+                <span>${escapeAdminHtml(label)}</span>
+                <strong>${escapeAdminHtml(normalizedPath.split("/").pop() || "Uploaded file")}</strong>
+                <a href="${escapeAdminHtml(fileUrl)}" target="_blank" rel="noopener">Open file</a>
+            </div>
+        </div>
+    `;
+}
+
+function renderAdminEmployeeProfileRecord(user = {}) {
+    const container = document.getElementById("employeeProfileRecord");
+    if (!container) return;
+
+    const profileStatus = formatAdminProfileLabel(user.profile_setup_status || "pending");
+    const pfEnabled = Number(user.pf_enabled || 0) ? "Yes" : "No";
+    const avatarUrl = getAdminProfileFileUrl(user.prof_img);
+    const avatarMarkup = avatarUrl && isAdminProfileImageFile(user.prof_img)
+        ? `<img src="${escapeAdminHtml(avatarUrl)}" alt="${escapeAdminHtml(user.name || "Employee")}" />`
+        : `<span>${escapeAdminHtml(String(user.name || "U").trim().slice(0, 1).toUpperCase() || "U")}</span>`;
+
+    container.innerHTML = `
+        <div class="profile-record-head">
+            <div class="profile-record-avatar">${avatarMarkup}</div>
+            <div>
+                <span class="section-kicker">Employee Record</span>
+                <h2>${escapeAdminHtml(user.name || "Employee")}</h2>
+                <p>${escapeAdminHtml(formatAdminProfileLabel(user.role))} | ${escapeAdminHtml(user.comp_name || "Metrics Mart")}</p>
+            </div>
+            <div class="profile-record-status">
+                <span>${escapeAdminHtml(profileStatus)}</span>
+                <small>Submitted: ${escapeAdminHtml(formatAdminProfileDateTimeValue(user.profile_setup_completed_at))}</small>
+            </div>
+        </div>
+
+        <div class="profile-detail-grid">
+            ${renderAdminProfileSection("Admin Entered Account Details", [
+                { label: "Employee code", value: user.employee_code },
+                { label: "Full name", value: user.name },
+                { label: "Email", value: user.email },
+                { label: "Contact", value: user.contact },
+                { label: "Family number", value: user.alt_contact },
+                { label: "Role", value: formatAdminProfileLabel(user.role) },
+                { label: "Department", value: user.department || formatAdminProfileLabel(user.role) },
+                { label: "Company", value: user.comp_name },
+                { label: "Monthly salary", value: formatAdminProfileAmount(user.salary) },
+                { label: "Login time", value: user.login_time },
+                { label: "Logout time", value: user.logout_time },
+                { label: "Address", value: user.address },
+            ])}
+
+            ${renderAdminProfileSection("Personal & Identity Details", [
+                { label: "Date of birth", value: formatAdminProfileDateValue(user.date_of_birth) },
+                { label: "Gender", value: formatAdminProfileLabel(user.gender) },
+                { label: "Nationality", value: user.nationality },
+                { label: "Aadhar number", value: user.aadhar_no },
+                { label: "PAN number", value: user.pan_number },
+            ])}
+
+            ${renderAdminProfileSection("Bank Details", [
+                { label: "Bank name", value: user.bank_name },
+                { label: "Account number", value: user.account_no },
+                { label: "IFSC code", value: user.ifsc_code },
+                { label: "Beneficiary name", value: user.beneficiary_name },
+            ])}
+
+            ${renderAdminProfileSection("Joining, Experience & Skills", [
+                { label: "Joining date", value: formatAdminProfileDateValue(user.joining_date) },
+                { label: "Total experience", value: user.total_experience },
+                { label: "Skills", value: parseAdminProfileSkills(user.skills) },
+            ])}
+
+            ${renderAdminProfileSection("PF Details", [
+                { label: "PF enabled", value: pfEnabled },
+                { label: "PF number", value: Number(user.pf_enabled || 0) ? user.pf_number : "-" },
+                { label: "UAN number", value: Number(user.pf_enabled || 0) ? user.uan_number : "-" },
+                { label: "Employee PF amount", value: Number(user.pf_enabled || 0) ? formatAdminProfileAmount(user.employee_pf_amount) : "-" },
+                { label: "Employer PF amount", value: Number(user.pf_enabled || 0) ? formatAdminProfileAmount(user.employer_pf_amount) : "-" },
+                { label: "PF joining date", value: Number(user.pf_enabled || 0) ? formatAdminProfileDateValue(user.pf_joining_date) : "-" },
+            ])}
+        </div>
+
+        <section class="profile-detail-section profile-documents-section">
+            <h3>Uploaded Files</h3>
+            <div class="profile-file-grid">
+                ${renderAdminProfileFileCard("Profile image", user.prof_img)}
+                ${renderAdminProfileFileCard("Aadhar image", user.aadhar_img)}
+                ${renderAdminProfileFileCard("PAN image", user.pan_img)}
+                ${renderAdminProfileFileCard("Cancelled cheque", user.cancelled_cheque)}
+                ${renderAdminProfileFileCard("Resume", user.resume_file)}
+                ${renderAdminProfileFileCard("Experience letter", user.experience_file)}
+                ${renderAdminProfileFileCard("Certification file", user.certification_file)}
+            </div>
+        </section>
+    `;
+}
+
+async function loadAdminEmployeeProfileRecord(userId, fallbackUser = {}) {
+    const container = document.getElementById("employeeProfileRecord");
+    if (container) {
+        container.innerHTML = '<div class="profile-record-empty">Loading employee profile record...</div>';
+    }
+
+    try {
+        const res = await fetch(`${BASE_URL}/api/admin/users/${Number(userId)}`, {
+            cache: "no-store",
+        });
+        const result = await res.json();
+
+        if (!res.ok || !result.success || !result.data) {
+            throw new Error(result.message || "Unable to load employee profile record");
+        }
+
+        renderAdminEmployeeProfileRecord({ ...fallbackUser, ...result.data });
+    } catch (err) {
+        console.error("Employee profile record load failed:", err);
+        renderAdminEmployeeProfileRecord(fallbackUser);
+        if (container) {
+            container.insertAdjacentHTML(
+                "beforeend",
+                `<div class="profile-record-warning">${escapeAdminHtml(err.message || "Full profile details could not be loaded.")}</div>`,
+            );
+        }
+    }
+}
+
 function renderAdminAttendanceStatus(row) {
     const statusMeta = getAdminAttendanceStatusMeta(row.status);
     return `<span class="attendance-status ${statusMeta.className}">${statusMeta.label}</span>`;
@@ -2206,6 +2452,8 @@ async function openEmployeeDetails(userId, returnSection = "team") {
     }
 
     empPhoto.alt = `${user.name || "Employee"} profile`;
+
+    await loadAdminEmployeeProfileRecord(userId, user);
 
     if (role === "dev") {
         document.getElementById("devPerformance").style.display = "block";
