@@ -120,6 +120,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSidebarNavigation();
   setupToolbar();
   setupUserRegistration();
+  setupHrEmployeeProfileModal();
   setupDashboardQuickLinks();
   togglePayrollToolbar("dashboard");
 
@@ -170,6 +171,24 @@ function setupUserRegistration() {
 
     if (!modal?.classList.contains("hidden")) {
       closeHrUserForm();
+    }
+  });
+}
+
+function setupHrEmployeeProfileModal() {
+  const modal = document.getElementById("hrEmployeeProfileModal");
+  const closeBtn = document.getElementById("hrEmployeeProfileCloseBtn");
+
+  closeBtn?.addEventListener("click", closeHrEmployeeProfileModal);
+  modal?.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      closeHrEmployeeProfileModal();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal?.classList.contains("hidden")) {
+      closeHrEmployeeProfileModal();
     }
   });
 }
@@ -521,6 +540,257 @@ function parseSkills(value) {
   } catch {
     return [];
   }
+}
+
+function formatHrProfileValue(value, fallback = "-") {
+  if (value === null || value === undefined) return fallback;
+  const normalized = String(value).trim();
+  return normalized || fallback;
+}
+
+function formatHrProfileLabel(value, fallback = "-") {
+  const normalized = formatHrProfileValue(value, "");
+  if (!normalized) return fallback;
+
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatHrProfileDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(String(value).replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return formatHrProfileValue(value);
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatHrProfileAmount(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return formatHrProfileValue(value);
+
+  return `Rs. ${amount.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function getHrProfileFileUrl(filePath) {
+  const normalized = String(filePath || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized) return "";
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  return `${BASE_URL}/${normalized}`;
+}
+
+function isHrProfileImageFile(filePath) {
+  return /\.(jpg|jpeg|png|gif|webp)$/i.test(String(filePath || "").split("?")[0]);
+}
+
+function parseHrProfileSkills(value) {
+  const labels = {
+    web: "Web",
+    seo: "SEO",
+    smo: "SMO",
+    ads: "Ads",
+    app: "App",
+    erp: "ERP",
+    erp_crm: "ERP/CRM",
+  };
+  let source = value;
+
+  if (typeof source === "string") {
+    const trimmed = source.trim();
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        source = JSON.parse(trimmed);
+      } catch {
+        source = value;
+      }
+    }
+  }
+
+  const skills = Array.isArray(source)
+    ? source
+    : String(source || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+  return skills
+    .map((skill) => labels[String(skill || "").toLowerCase().trim()] || formatHrProfileLabel(skill, ""))
+    .filter(Boolean)
+    .join(", ") || "-";
+}
+
+function renderHrProfileFields(rows) {
+  return rows
+    .map(
+      (row) => `
+        <div class="profile-field">
+          <span>${escapeHtml(row.label)}</span>
+          <strong>${row.html || escapeHtml(formatHrProfileValue(row.value))}</strong>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderHrProfileSection(title, rows) {
+  return `
+    <section class="profile-detail-section">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="profile-field-grid">
+        ${renderHrProfileFields(rows)}
+      </div>
+    </section>
+  `;
+}
+
+function renderHrProfileFileCard(label, filePath) {
+  const fileUrl = getHrProfileFileUrl(filePath);
+  if (!fileUrl) {
+    return `
+      <div class="profile-file-card missing">
+        <span>${escapeHtml(label)}</span>
+        <strong>Not uploaded</strong>
+      </div>
+    `;
+  }
+
+  const normalizedPath = String(filePath || "").replace(/\\/g, "/");
+  const preview = isHrProfileImageFile(normalizedPath)
+    ? `<img src="${escapeHtml(fileUrl)}" alt="${escapeHtml(label)}" loading="lazy" />`
+    : `<div class="profile-file-icon"><i class="fas fa-file-lines"></i></div>`;
+
+  return `
+    <div class="profile-file-card">
+      ${preview}
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(normalizedPath.split("/").pop() || "Uploaded file")}</strong>
+        <a href="${escapeHtml(fileUrl)}" target="_blank" rel="noopener">Open file</a>
+      </div>
+    </div>
+  `;
+}
+
+function renderHrEmployeeProfileDetails(employee = {}) {
+  const body = document.getElementById("hrEmployeeProfileBody");
+  const title = document.getElementById("hrEmployeeProfileTitle");
+  if (!body) return;
+
+  if (title) {
+    title.textContent = employee.name || "Employee Profile";
+  }
+
+  const avatarUrl = getHrProfileFileUrl(employee.prof_img);
+  const avatarMarkup = avatarUrl && isHrProfileImageFile(employee.prof_img)
+    ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(employee.name || "Employee")}" />`
+    : `<span>${escapeHtml(String(employee.name || "E").trim().slice(0, 1).toUpperCase() || "E")}</span>`;
+  const profileStatus = formatHrProfileLabel(employee.profile_setup_status || "pending");
+
+  body.innerHTML = `
+    <div class="profile-record-head">
+      <div class="profile-record-avatar">${avatarMarkup}</div>
+      <div>
+        <span class="section-kicker">Employee Record</span>
+        <h2>${escapeHtml(employee.name || "Employee")}</h2>
+        <p>${escapeHtml(formatRole(employee.role))} | ${escapeHtml(employee.comp_name || "Metrics Mart")}</p>
+      </div>
+      <div class="profile-record-status">
+        <span>${escapeHtml(profileStatus)}</span>
+        <small>Submitted: ${escapeHtml(formatHrProfileDateTime(employee.profile_setup_completed_at))}</small>
+      </div>
+    </div>
+
+    <div class="profile-detail-grid">
+      ${renderHrProfileSection("Admin Entered Account Details", [
+        { label: "Employee code", value: employee.employee_code },
+        { label: "Full name", value: employee.name },
+        { label: "Email", value: employee.email },
+        { label: "Contact", value: employee.contact },
+        { label: "Family number", value: employee.alt_contact },
+        { label: "Role", value: formatRole(employee.role) },
+        { label: "Department", value: employee.department || formatRole(employee.role) },
+        { label: "Company", value: employee.comp_name },
+        { label: "Monthly salary", value: formatHrProfileAmount(employee.salary) },
+        { label: "Login time", value: employee.login_time },
+        { label: "Logout time", value: employee.logout_time },
+        { label: "Address", value: employee.address },
+      ])}
+
+      ${renderHrProfileSection("Personal & Identity Details", [
+        { label: "Date of birth", value: formatDate(employee.date_of_birth) },
+        { label: "Gender", value: formatHrProfileLabel(employee.gender) },
+        { label: "Nationality", value: employee.nationality },
+        { label: "Aadhar number", value: employee.aadhar_no },
+        { label: "PAN number", value: employee.pan_number },
+      ])}
+
+      ${renderHrProfileSection("Bank Details", [
+        { label: "Bank name", value: employee.bank_name },
+        { label: "Account number", value: employee.account_no },
+        { label: "IFSC code", value: employee.ifsc_code },
+        { label: "Beneficiary name", value: employee.beneficiary_name },
+      ])}
+
+      ${renderHrProfileSection("Joining, Experience & Skills", [
+        { label: "Joining date", value: formatDate(employee.joining_date) },
+        { label: "Total experience", value: employee.total_experience },
+        { label: "Skills", value: parseHrProfileSkills(employee.skills) },
+      ])}
+
+      ${renderHrProfileSection("PF Details", [
+        { label: "PF enabled", value: Number(employee.pf_enabled || 0) ? "Yes" : "No" },
+        { label: "PF number", value: Number(employee.pf_enabled || 0) ? employee.pf_number : "-" },
+        { label: "UAN number", value: Number(employee.pf_enabled || 0) ? employee.uan_number : "-" },
+        { label: "Employee PF amount", value: Number(employee.pf_enabled || 0) ? formatHrProfileAmount(employee.employee_pf_amount) : "-" },
+        { label: "Employer PF amount", value: Number(employee.pf_enabled || 0) ? formatHrProfileAmount(employee.employer_pf_amount) : "-" },
+        { label: "PF joining date", value: Number(employee.pf_enabled || 0) ? formatDate(employee.pf_joining_date) : "-" },
+      ])}
+    </div>
+
+    <section class="profile-detail-section profile-documents-section">
+      <h3>Uploaded Files</h3>
+      <div class="profile-file-grid">
+        ${renderHrProfileFileCard("Profile image", employee.prof_img)}
+        ${renderHrProfileFileCard("Aadhar image", employee.aadhar_img)}
+        ${renderHrProfileFileCard("PAN image", employee.pan_img)}
+        ${renderHrProfileFileCard("Cancelled cheque", employee.cancelled_cheque)}
+        ${renderHrProfileFileCard("Resume", employee.resume_file)}
+        ${renderHrProfileFileCard("Experience letter", employee.experience_file)}
+        ${renderHrProfileFileCard("Certification file", employee.certification_file)}
+      </div>
+    </section>
+  `;
+}
+
+function openHrEmployeeProfile(employeeId) {
+  const employee = hrState.employees.find((item) => String(item.id) === String(employeeId));
+  if (!employee) {
+    showToast("Employee profile record not found.", true);
+    return;
+  }
+
+  renderHrEmployeeProfileDetails(employee);
+  const modal = document.getElementById("hrEmployeeProfileModal");
+  modal?.classList.remove("hidden");
+  modal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeHrEmployeeProfileModal() {
+  const modal = document.getElementById("hrEmployeeProfileModal");
+  modal?.classList.add("hidden");
+  modal?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
 }
 
 function getManagerLabel(employee) {
@@ -2137,10 +2407,15 @@ function renderEmployeeDirectory(employees) {
           <td>${statusPill(lifecycle.label, lifecycle.tone)}</td>
           <td>${escapeHtml(getManagerLabel(employee))}</td>
           <td>${escapeHtml(`${docCompletion.present}/${docCompletion.required}`)}</td>
+          <td>
+            <button type="button" class="profile-action-btn" onclick="openHrEmployeeProfile(${Number(employee.id)})">
+              View Profile
+            </button>
+          </td>
         </tr>
       `;
     }),
-    6,
+    7,
     "No employees match the current search.",
   );
 }
