@@ -1998,6 +1998,63 @@ async function loadTeam() {
     }
 }
 function filterTeamByRole(role) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.getAttribute('data-role') === role) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    const table = document.getElementById('teamTable');
+    if (!table) return;
+    table.innerHTML = '';
+    let filtered = allTeamData;
+    if (role !== 'all') {
+        filtered = allTeamData.filter(user => 
+            user.role && user.role.toLowerCase().trim() === role.toLowerCase().trim()
+        );
+    }
+    if (filtered.length === 0) {
+        table.innerHTML = `<tr><td colspan="6" style="padding:30px;color:#64748b;text-align:center;">No users found for this role.</td></tr>`;
+        return;
+    }
+    filtered.forEach(user => {
+        table.innerHTML += `
+            <tr>
+                <td>${user.name}</td>
+                <td>${user.email}</td>
+                <td>${user.role}</td>
+                <td>${user.total_leads}</td>
+                <td>${user.total_appointments}</td>
+                <td>${user.total_followups}</td>
+            </tr>
+        `;
+    });
+}
+
+async function loadTeam() {
+    try {
+        const res = await fetch(`${BASE_URL}/api/admin/team-report`);
+        const result = await res.json();
+
+        if (!result.success || !result.data) {
+            throw new Error("No team data");
+        }
+
+        allTeamData = result.data;
+        adminDashboardCache.team = result.data;
+        filterTeamByRole('all');
+    } catch (err) {
+        console.error("Team Load Error:", err);
+        document.getElementById('teamTable').innerHTML = `
+            <tr>
+                <td colspan="8" style="color:red;padding:20px;">Error loading team data</td>
+            </tr>
+        `;
+    }
+}
+
+function filterTeamByRole(role) {
 
     // Active button toggle
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -2095,73 +2152,6 @@ function filterTeamByRole(role) {
         `;
     });
 
-}
-
-async function loadTeam() {
-    try {
-        const res = await fetch(`${BASE_URL}/api/admin/team-report`);
-        const result = await res.json();
-
-        if (!result.success || !result.data) {
-            throw new Error("No team data");
-        }
-
-        allTeamData = result.data;
-        adminDashboardCache.team = result.data;
-        filterTeamByRole('all');
-    } catch (err) {
-        console.error("Team Load Error:", err);
-        document.getElementById('teamTable').innerHTML = `
-            <tr>
-                <td colspan="8" style="color:red;padding:20px;">Error loading team data</td>
-            </tr>
-        `;
-    }
-}
-
-function filterTeamByRole(role) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (btn.getAttribute('data-role')?.toLowerCase() === role.toLowerCase()) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    });
-
-    const table = document.getElementById('teamTable');
-    table.innerHTML = '';
-
-    let filtered = allTeamData;
-    if (role !== 'all') {
-        filtered = allTeamData.filter(user =>
-            user.role && user.role.toLowerCase().trim() === role.toLowerCase().trim()
-        );
-    }
-
-    if (filtered.length === 0) {
-        table.innerHTML = `<tr><td colspan="8" style="padding:30px;color:#64748b;text-align:center;">No users found for this role.</td></tr>`;
-        return;
-    }
-
-    filtered.forEach(user => {
-        table.innerHTML += `
-            <tr>
-                <td>
-                    <div class="employee-status-stack">
-                        <span class="team-employee-name">${user.name || "-"}</span>
-                        ${renderTeamPresenceBadge(user)}
-                    </div>
-                </td>
-                <td>${user.email || "-"}</td>
-                <td>${renderAdminRoleBadge(user.role)}</td>
-                <td>${user.total_leads || 0}</td>
-                <td>${user.total_appointments || 0}</td>
-                <td>${user.total_followups || 0}</td>
-                <td><button class="attBtn" onclick="openEmployeeDetails(${user.id})">View</button></td>
-                <td><button class="attBtn secondary" onclick="openUserEditForm(${user.id})">Update</button></td>
-            </tr>
-        `;
-    });
 }
 
 let selectedEmployeeId = null;
