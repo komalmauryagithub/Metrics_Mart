@@ -1998,38 +1998,103 @@ async function loadTeam() {
     }
 }
 function filterTeamByRole(role) {
+
+    // Active button toggle
     document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (btn.getAttribute('data-role') === role) {
+        const btnRole = btn.dataset.role?.toLowerCase().trim();
+
+        if (btnRole === role.toLowerCase().trim()) {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
         }
     });
+
     const table = document.getElementById('teamTable');
-    if (!table) return;
     table.innerHTML = '';
+
+    // Filter logic
     let filtered = allTeamData;
-    if (role !== 'all') {
-        filtered = allTeamData.filter(user => 
-            user.role && user.role.toLowerCase().trim() === role.toLowerCase().trim()
-        );
+
+    if (role.toLowerCase() !== 'all') {
+        filtered = allTeamData.filter(user => {
+
+            // DB role
+            const userRole = user.role?.toLowerCase().trim();
+
+            // Mapping
+            const roleMap = {
+                acc: 'accounts',
+                dev: 'dev',
+                hr: 'hr',
+                me: 'me',
+                tme: 'tme',
+                seo: 'seo',
+                admin: 'admin'
+            };
+
+            return userRole === roleMap[role.toLowerCase()];
+        });
     }
+
+    // No data
     if (filtered.length === 0) {
-        table.innerHTML = `<tr><td colspan="6" style="padding:30px;color:#64748b;text-align:center;">No users found for this role.</td></tr>`;
+        table.innerHTML = `
+            <tr>
+                <td colspan="8" style="padding:30px;color:#64748b;text-align:center;">
+                    No users found for this role.
+                </td>
+            </tr>
+        `;
         return;
     }
+
+    // Render rows
     filtered.forEach(user => {
+
         table.innerHTML += `
             <tr>
-                <td>${user.name}</td>
-                <td>${user.email}</td>
-                <td>${user.role}</td>
-                <td>${user.total_leads}</td>
-                <td>${user.total_appointments}</td>
-                <td>${user.total_followups}</td>
+                <td>
+                    <div class="employee-status-stack">
+                        <span class="team-employee-name">
+                            ${user.name || "-"}
+                        </span>
+
+                        ${renderTeamPresenceBadge(user)}
+                    </div>
+                </td>
+
+                <td>${user.email || "-"}</td>
+
+                <td>${renderAdminRoleBadge(user.role)}</td>
+
+                <td>${user.total_leads || 0}</td>
+
+                <td>${user.total_appointments || 0}</td>
+
+                <td>${user.total_followups || 0}</td>
+
+                <td>
+                    <button 
+                        class="attBtn" 
+                        onclick="openEmployeeDetails(${user.id})"
+                    >
+                        View
+                    </button>
+                </td>
+
+                <td>
+                    <button 
+                        class="attBtn secondary" 
+                        onclick="openUserEditForm(${user.id})"
+                    >
+                        Update
+                    </button>
+                </td>
             </tr>
         `;
     });
+
 }
 
 async function loadTeam() {
