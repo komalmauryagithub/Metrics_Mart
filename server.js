@@ -5440,6 +5440,7 @@ async function getProfileSetupUserByToken(token) {
 
 app.post("/api/admin/users/:id/profile-setup-link", async (req, res) => {
   const userId = Number(req.params.id);
+  const requireEmail = normalizeInviteMailerFlag(req.body?.requireEmail);
 
   if (!userId) {
     return res.status(400).json({
@@ -5497,12 +5498,20 @@ app.post("/api/admin/users/:id/profile-setup-link", async (req, res) => {
     const inviteMessage = profileSetup?.emailDispatch?.sent
       ? profileSetup.emailDispatch.message
       : profileSetup?.emailDispatch?.message || "Profile completion link generated";
-
-    res.json({
-      success: true,
+    const emailSent = Boolean(profileSetup?.emailDispatch?.sent);
+    const responsePayload = {
+      success: !requireEmail || emailSent,
       message: inviteMessage,
+      emailSent,
+      emailDispatch: profileSetup?.emailDispatch || null,
       profileSetup,
-    });
+    };
+
+    if (requireEmail && !emailSent) {
+      return res.status(503).json(responsePayload);
+    }
+
+    res.json(responsePayload);
   } catch (err) {
     console.error("Profile Setup Link Error:", err);
     res.status(500).json({
