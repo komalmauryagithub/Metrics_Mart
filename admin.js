@@ -876,9 +876,9 @@ async function handleProfileSetupInvite(profileSetup) {
         ? emailDispatch.missingConfig.filter((value) => String(value || "").trim())
         : [];
     const baseEmailMessage = String(emailDispatch.message || "").trim();
-    const emailMessage = !emailSent && requiredConfig.length
-        ? `${baseEmailMessage || "Automatic profile setup email could not be sent."} Configure ${requiredConfig.join(", ")} in the server .env file to enable auto email.`
-        : baseEmailMessage;
+    const emailMessage = emailSent
+        ? baseEmailMessage || "Profile form email sent successfully."
+        : baseEmailMessage || "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
     return {
         copied: false,
         emailSent,
@@ -900,7 +900,7 @@ function openProfileSetupDraft(profileSetup) {
 async function resendProfileSetupEmail(userId, profileSetup, button = null) {
     const normalizedUserId = Number(userId || 0);
     if (!normalizedUserId) {
-        showPopup("Profile Email", "User was created, but user id is missing for email resend.", false, { autoClose: false });
+        showPopup("Profile Form", "User was created, but user id is missing for email resend.", false, { autoClose: false });
         return;
     }
 
@@ -924,13 +924,13 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
             throw new Error(
                 result.message ||
                 emailDispatch.message ||
-                "Profile setup email could not be sent. Please check SMTP settings.",
+                "Profile form email could not be sent. Please share the link manually.",
             );
         }
 
         showPopup(
-            "Profile Email Sent",
-            emailDispatch.message || "Profile setup email sent successfully.",
+            "Profile Form Email Sent",
+            emailDispatch.message || "Profile form email sent successfully.",
             true,
         );
     } catch (error) {
@@ -949,7 +949,7 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
         });
         showPopup(
             "Email Not Sent",
-            error.message || "Profile setup email could not be sent. Please check SMTP settings.",
+            error.message || "Profile form email could not be sent. Please share the link manually.",
             false,
             { autoClose: false, actions: fallbackActions },
         );
@@ -963,39 +963,55 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
 
 function showProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
     const message = inviteResult.emailMessage ||
-        "User created successfully. The profile setup email was not sent automatically.";
+        "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
+    const canTryAutomaticEmail =
+        !Array.isArray(inviteResult.requiredConfig) || inviteResult.requiredConfig.length === 0;
+    const actions = [];
+
+    if (canTryAutomaticEmail) {
+        actions.push({
+            label: "Send Profile Link by Email",
+            variant: "primary",
+            onClick: (button) => resendProfileSetupEmail(userId, profileSetup, button),
+        });
+    }
+
+    if (profileSetup?.gmailComposeUrl || profileSetup?.mailtoUrl) {
+        actions.push({
+            label: "Open Email Draft",
+            variant: "primary",
+            onClick: () => openProfileSetupDraft(profileSetup),
+        });
+    }
+
+    actions.push(
+        {
+            label: "Copy Link",
+            variant: "secondary",
+            onClick: async () => {
+                const copied = await copyTextToClipboard(profileSetup?.invitationLink || "");
+                showPopup(
+                    copied ? "Link Copied" : "Profile Link",
+                    copied ? "Profile form link copied." : profileSetup?.invitationLink || "Profile link unavailable.",
+                    copied,
+                    { autoClose: copied ? undefined : false },
+                );
+            },
+        },
+        {
+            label: "Close",
+            variant: "secondary",
+            onClick: hidePopup,
+        },
+    );
 
     showPopup(
-        "Send Profile Form",
-        `${message} Click below to email the second form link to the employee.`,
+        "Profile Form Link Ready",
+        message,
         false,
         {
             autoClose: false,
-            actions: [
-                {
-                    label: "Send Profile Link by Email",
-                    variant: "primary",
-                    onClick: (button) => resendProfileSetupEmail(userId, profileSetup, button),
-                },
-                {
-                    label: "Copy Link",
-                    variant: "secondary",
-                    onClick: async () => {
-                        const copied = await copyTextToClipboard(profileSetup?.invitationLink || "");
-                        showPopup(
-                            copied ? "Link Copied" : "Profile Link",
-                            copied ? "Profile setup link copied." : profileSetup?.invitationLink || "Profile link unavailable.",
-                            copied,
-                            { autoClose: copied ? undefined : false },
-                        );
-                    },
-                },
-                {
-                    label: "Close",
-                    variant: "secondary",
-                    onClick: hidePopup,
-                },
-            ],
+            actions,
         },
     );
 }
@@ -3228,6 +3244,32 @@ function setUserFieldValue(form, fieldName, value = "") {
     form.elements[fieldName].value = value ?? "";
 }
 
+async function populateNextEmployeeCode(form = getUserFormElement()) {
+    const employeeCodeField = form?.elements?.employee_code;
+    if (!employeeCodeField) return;
+
+    employeeCodeField.value = "Generating...";
+
+    try {
+        const response = await fetch(`${BASE_URL}/api/users/next-employee-code`, {
+            cache: "no-store",
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || "Failed to generate employee code");
+        }
+
+        employeeCodeField.value =
+            result.employeeCode ||
+            result.data?.employee_code ||
+            "";
+    } catch (error) {
+        console.warn("Next employee code load failed:", error);
+        employeeCodeField.value = "Auto-generated";
+    }
+}
+
 function toggleUserPfFields() {
     const pfEnabled = document.getElementById("userPfEnabled");
     const pfDetails = document.getElementById("userPfDetails");
@@ -3362,6 +3404,7 @@ function showUserFormModal() {
 function openUserForm() {
     resetUserFormState();
     showUserFormModal();
+    populateNextEmployeeCode();
 }
 
 async function openUserEditForm(userId) {
@@ -4327,15 +4370,15 @@ if (adminRegisterForm) {
                 const popupTitle = isEditMode
                     ? "Success"
                     : inviteResult && !inviteResult.emailSent
-                        ? "User Created, Email Not Sent"
+                        ? "User Created"
                         : "Success";
                 const successMessage = isEditMode
                     ? "User updated successfully"
                     : inviteResult?.emailSent
-                        ? "User created successfully. Profile setup email was sent automatically."
+                        ? "User created successfully. Profile form email sent successfully."
                         : inviteResult?.copied
-                            ? `User created successfully. ${inviteResult?.emailMessage || "Automatic profile setup email could not be sent."} Profile link copied for manual sharing.`
-                            : `User created successfully. ${inviteResult?.emailMessage || "Automatic profile setup email could not be sent."}`;
+                            ? "User created successfully. Profile form link copied for manual sharing."
+                            : "User created successfully. Profile form link is ready for manual sharing.";
                 this.reset();
                 closeUserForm();
                 loadTeam();
