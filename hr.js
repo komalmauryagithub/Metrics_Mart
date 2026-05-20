@@ -102,6 +102,7 @@ const HR_NOTICES = [
 
 let currentUser = null;
 let toastTimer = null;
+let hrPopupTimer = null;
 let chartInstances = {};
 let hrFallbackAdminIdPromise = null;
 let hrState = {
@@ -2761,6 +2762,64 @@ function showToast(message, isError = false) {
   }, 2600);
 }
 
+function hideHrActionPopup() {
+  const popup = document.getElementById("hrProfileSetupPopup");
+  if (hrPopupTimer) {
+    clearTimeout(hrPopupTimer);
+    hrPopupTimer = null;
+  }
+  popup?.classList.add("hidden");
+}
+
+function showHrActionPopup(title, message, isSuccess, options = {}) {
+  const popup = document.getElementById("hrProfileSetupPopup");
+  const icon = document.getElementById("hrProfileSetupPopupIcon");
+  const titleEl = document.getElementById("hrProfileSetupPopupTitle");
+  const messageEl = document.getElementById("hrProfileSetupPopupMessage");
+  const actionsEl = document.getElementById("hrProfileSetupPopupActions");
+
+  if (!popup || !titleEl || !messageEl) {
+    showToast(message || title, !isSuccess);
+    return;
+  }
+
+  titleEl.textContent = title || "Profile Form";
+  messageEl.textContent = message || "";
+
+  if (icon) {
+    icon.className = isSuccess ? "fas fa-check-circle" : "fas fa-exclamation-circle";
+    icon.style.color = isSuccess ? HR_THEME.accent : HR_THEME.danger;
+  }
+
+  if (hrPopupTimer) {
+    clearTimeout(hrPopupTimer);
+    hrPopupTimer = null;
+  }
+
+  if (actionsEl) {
+    actionsEl.innerHTML = "";
+    const actions = Array.isArray(options.actions) ? options.actions : [];
+    actionsEl.classList.toggle("hidden", actions.length === 0);
+
+    actions.forEach((action) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `popup-action-btn ${action.variant || "secondary"}`;
+      button.textContent = action.label || "Action";
+      button.addEventListener("click", () => action.onClick?.(button));
+      actionsEl.appendChild(button);
+    });
+  }
+
+  popup.classList.remove("hidden");
+
+  if (options.autoClose !== false) {
+    hrPopupTimer = setTimeout(() => {
+      popup.classList.add("hidden");
+    }, options.autoCloseMs || 1800);
+  }
+}
+
 function logout() {
   localStorage.removeItem("currentUser");
   window.location.href = "mp.html";
@@ -2863,12 +2922,7 @@ async function submitHrUserRegistration(event) {
     await refreshHrPanel({ showSuccessToast: false });
     showToast(successMessage);
     if (!inviteResult?.emailSent && data.userId) {
-      const shouldSendEmail = window.confirm(
-        "Profile setup email was not sent automatically. Send the second form link by email now?",
-      );
-      if (shouldSendEmail) {
-        await resendHrProfileSetupEmail(data.userId, data.profileSetup);
-      }
+      showHrProfileSetupEmailPrompt(data.userId, data.profileSetup, inviteResult);
     }
   } catch (error) {
     console.error("HR user registration failed:", error);
@@ -2917,41 +2971,163 @@ async function handleHrProfileSetupInvite(profileSetup) {
   const invitationLink = String(profileSetup?.invitationLink || "").trim();
   const emailDispatch = profileSetup?.emailDispatch || {};
   const emailSent = Boolean(emailDispatch.sent);
+  const requiredConfig = Array.isArray(emailDispatch.missingConfig)
+    ? emailDispatch.missingConfig.filter((value) => String(value || "").trim())
+    : [];
+  const baseEmailMessage = String(emailDispatch.message || "").trim();
+  const emailMessage = !emailSent && requiredConfig.length
+    ? `${baseEmailMessage || "Automatic profile setup email could not be sent."} Configure ${requiredConfig.join(", ")} in the server .env file to enable auto email.`
+    : baseEmailMessage;
 
   return {
     copied: false,
     emailSent,
+    emailMessage,
     invitationLink,
+    requiredConfig,
   };
 }
 
-async function resendHrProfileSetupEmail(userId, profileSetup = {}) {
+function openHrProfileSetupDraft(profileSetup) {
+  const gmailComposeUrl = String(profileSetup?.gmailComposeUrl || "").trim();
+  const mailtoUrl = String(profileSetup?.mailtoUrl || "").trim();
+  const draftUrl = gmailComposeUrl || mailtoUrl;
+  if (!draftUrl) return false;
+  window.open(draftUrl, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+function getHrProfileSetupFallbackActions(profileSetup = {}) {
+  const actions = [];
+  if (profileSetup.gmailComposeUrl || profileSetup.mailtoUrl) {
+    actions.push({
+      label: "Open Email Draft",
+      variant: "primary",
+      onClick: () => openHrProfileSetupDraft(profileSetup),
+    });
+  }
+
+  actions.push({
+    label: "Copy Link",
+    variant: "secondary",
+    onClick: async () => {
+      const copied = await copyTextToClipboard(profileSetup.invitationLink || "");
+      showHrActionPopup(
+        copied ? "Link Copied" : "Profile Link",
+        copied ? "Profile setup link copied." : profileSetup.invitationLink || "Profile setup link unavailable.",
+        copied,
+        { autoClose: copied ? undefined : false },
+      );
+    },
+  });
+
+  actions.push({
+    label: "Close",
+    variant: "secondary",
+    onClick: hideHrActionPopup,
+  });
+
+  return actions;
+}
+
+function showHrProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
+  const message = inviteResult.emailMessage ||
+    "User created successfully. The profile setup email was not sent automatically.";
+  const canTryAutomaticEmail =
+    !Array.isArray(inviteResult.requiredConfig) || inviteResult.requiredConfig.length === 0;
+  const actions = [
+    ...(canTryAutomaticEmail
+      ? [
+          {
+            label: "Send Profile Link by Email",
+            variant: "primary",
+            onClick: (button) => resendHrProfileSetupEmail(userId, profileSetup, button),
+          },
+        ]
+      : []),
+    ...getHrProfileSetupFallbackActions(profileSetup),
+  ];
+
+  showHrActionPopup(
+    "Send Profile Form",
+    `${message} Use the options below to share the second form link with the employee.`,
+    false,
+    {
+      autoClose: false,
+      actions,
+    },
+  );
+}
+
+async function resendHrProfileSetupEmail(userId, profileSetup = {}, button = null) {
+  const normalizedUserId = Number(userId || 0);
+  let latestProfileSetup = profileSetup || {};
+  if (!normalizedUserId) {
+    showHrActionPopup(
+      "Profile Email",
+      "User was created, but user id is missing for email resend.",
+      false,
+      { autoClose: false, actions: [{ label: "Close", variant: "secondary", onClick: hideHrActionPopup }] },
+    );
+    return;
+  }
+
+  const originalLabel = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Sending...";
+  }
+
   try {
     showToast("Sending profile setup email...");
-    const response = await fetch(`${BASE_URL}/api/admin/users/${Number(userId)}/profile-setup-link`, {
+    const response = await fetch(`${BASE_URL}/api/admin/users/${normalizedUserId}/profile-setup-link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requireEmail: true }),
+      body: JSON.stringify({ requireEmail: false }),
     });
     const result = await response.json().catch(() => ({}));
     const nextProfileSetup = result.profileSetup || profileSetup || {};
+    latestProfileSetup = nextProfileSetup;
     const emailDispatch = result.emailDispatch || nextProfileSetup.emailDispatch || {};
 
-    if (!response.ok || !result.success || !emailDispatch.sent) {
+    if (!response.ok || !result.success) {
       throw new Error(
         result.message ||
+        "Profile setup email could not be sent. Please check SMTP settings.",
+      );
+    }
+
+    if (!emailDispatch.sent) {
+      throw new Error(
         emailDispatch.message ||
         "Profile setup email could not be sent. Please check SMTP settings.",
       );
     }
 
-    showToast(emailDispatch.message || "Profile setup email sent successfully.");
+    showHrActionPopup(
+      "Profile Email Sent",
+      emailDispatch.message || "Profile setup email sent successfully.",
+      true,
+    );
   } catch (error) {
-    console.error("HR profile setup email resend failed:", error);
+    const expectedConfigMessage = /not configured|smtp/i.test(String(error?.message || ""));
+    if (!expectedConfigMessage) {
+      console.warn("HR profile setup email resend failed:", error);
+    }
     showToast(error.message || "Profile setup email could not be sent.", true);
-    const draftUrl = profileSetup?.gmailComposeUrl || profileSetup?.mailtoUrl || "";
-    if (draftUrl && window.confirm("Automatic email failed. Open a prepared email draft instead?")) {
-      window.open(draftUrl, "_blank", "noopener,noreferrer");
+    showHrActionPopup(
+      "Email Not Sent",
+      error.message || "Profile setup email could not be sent. Please check SMTP settings.",
+      false,
+      {
+        autoClose: false,
+        actions: getHrProfileSetupFallbackActions(latestProfileSetup),
+      },
+    );
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel || "Send Profile Link by Email";
     }
   }
 }
