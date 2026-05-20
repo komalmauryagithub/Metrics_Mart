@@ -2587,6 +2587,14 @@ async function submitHrUserRegistration(event) {
     closeHrUserForm();
     await refreshHrPanel({ showSuccessToast: false });
     showToast(successMessage);
+    if (!inviteResult?.emailSent && data.userId) {
+      const shouldSendEmail = window.confirm(
+        "Profile setup email was not sent automatically. Send the second form link by email now?",
+      );
+      if (shouldSendEmail) {
+        await resendHrProfileSetupEmail(data.userId, data.profileSetup);
+      }
+    }
   } catch (error) {
     console.error("HR user registration failed:", error);
     showToast(error.message || "Failed to create user.", true);
@@ -2634,19 +2642,43 @@ async function handleHrProfileSetupInvite(profileSetup) {
   const invitationLink = String(profileSetup?.invitationLink || "").trim();
   const emailDispatch = profileSetup?.emailDispatch || {};
   const emailSent = Boolean(emailDispatch.sent);
-  let copied = false;
-
-  if (!emailSent && invitationLink) {
-    copied = await copyTextToClipboard(invitationLink);
-  }
-
-  if (!emailSent && !copied && invitationLink) {
-    window.prompt("Copy this profile completion link", invitationLink);
-  }
 
   return {
-    copied,
+    copied: false,
     emailSent,
+    invitationLink,
   };
 }
+
+async function resendHrProfileSetupEmail(userId, profileSetup = {}) {
+  try {
+    showToast("Sending profile setup email...");
+    const response = await fetch(`${BASE_URL}/api/admin/users/${Number(userId)}/profile-setup-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requireEmail: true }),
+    });
+    const result = await response.json().catch(() => ({}));
+    const nextProfileSetup = result.profileSetup || profileSetup || {};
+    const emailDispatch = result.emailDispatch || nextProfileSetup.emailDispatch || {};
+
+    if (!response.ok || !result.success || !emailDispatch.sent) {
+      throw new Error(
+        result.message ||
+        emailDispatch.message ||
+        "Profile setup email could not be sent. Please check SMTP settings.",
+      );
+    }
+
+    showToast(emailDispatch.message || "Profile setup email sent successfully.");
+  } catch (error) {
+    console.error("HR profile setup email resend failed:", error);
+    showToast(error.message || "Profile setup email could not be sent.", true);
+    const draftUrl = profileSetup?.gmailComposeUrl || profileSetup?.mailtoUrl || "";
+    if (draftUrl && window.confirm("Automatic email failed. Open a prepared email draft instead?")) {
+      window.open(draftUrl, "_blank", "noopener,noreferrer");
+    }
+  }
+}
+
 window.logout = logout;
