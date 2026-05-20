@@ -1584,6 +1584,8 @@ async function issueProfileSetupInvite(req, userId, email, name) {
     [tokenHash, expiresAt, userId],
   );
 
+  await rememberProfileSetupToken(userId, tokenHash, expiresAt);
+
   const payload = buildProfileSetupInvitePayload(
     req,
     {
@@ -2967,6 +2969,8 @@ ensureUserRegistrationColumns().catch((err) => {
 });
 
 async function ensureUserProfileSetupColumns() {
+  await ensureUserRegistrationColumns();
+
   const schemaChanges = [
     "ALTER TABLE users ADD COLUMN employee_pf_amount decimal(10,2) DEFAULT NULL AFTER employee_pf_number",
     "ALTER TABLE users ADD COLUMN employer_pf_amount decimal(10,2) DEFAULT NULL AFTER employer_pf_number",
@@ -2984,6 +2988,80 @@ async function ensureUserProfileSetupColumns() {
 
 ensureUserProfileSetupColumns().catch((err) => {
   console.error("User profile setup schema setup failed:", err);
+});
+
+let profileSetupTokensTableReady = false;
+
+async function ensureProfileSetupTokensTable() {
+  if (profileSetupTokensTableReady) return;
+
+  await ensureUserProfileSetupColumns();
+  await dbPromise.query(`
+    CREATE TABLE IF NOT EXISTS profile_setup_tokens (
+      id int NOT NULL AUTO_INCREMENT,
+      user_id int NOT NULL,
+      token_hash varchar(128) NOT NULL,
+      expires_at datetime NOT NULL,
+      used_at datetime DEFAULT NULL,
+      created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY unique_profile_setup_token_hash (token_hash),
+      KEY profile_setup_tokens_user_id_idx (user_id),
+      KEY profile_setup_tokens_used_at_idx (used_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+
+  await dbPromise.query(`
+    INSERT INTO profile_setup_tokens (user_id, token_hash, expires_at, created_at)
+    SELECT
+      id,
+      profile_setup_token_hash,
+      profile_setup_expires_at,
+      COALESCE(profile_setup_sent_at, NOW())
+    FROM users
+    WHERE profile_setup_token_hash IS NOT NULL
+      AND profile_setup_expires_at IS NOT NULL
+      AND profile_setup_status <> 'completed'
+    ON DUPLICATE KEY UPDATE
+      expires_at = VALUES(expires_at),
+      used_at = NULL
+  `);
+
+  profileSetupTokensTableReady = true;
+}
+
+async function rememberProfileSetupToken(userId, tokenHash, expiresAt) {
+  try {
+    await ensureProfileSetupTokensTable();
+    await dbPromise.query(
+      `
+        INSERT INTO profile_setup_tokens (user_id, token_hash, expires_at)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          expires_at = VALUES(expires_at),
+          used_at = NULL
+      `,
+      [userId, tokenHash, expiresAt],
+    );
+  } catch (err) {
+    console.error("Profile setup token history save failed:", err);
+  }
+}
+
+async function markProfileSetupTokensUsed(userId) {
+  await ensureProfileSetupTokensTable();
+  await dbPromise.query(
+    `
+      UPDATE profile_setup_tokens
+      SET used_at = COALESCE(used_at, NOW())
+      WHERE user_id = ?
+    `,
+    [userId],
+  );
+}
+
+ensureProfileSetupTokensTable().catch((err) => {
+  console.error("Profile setup token table setup failed:", err);
 });
 
 async function ensureUserPasswordResetColumns() {
@@ -5411,6 +5489,59 @@ async function getProfileSetupUserByToken(token) {
   if (!normalizedToken) return null;
 
   const tokenHash = hashProfileSetupToken(normalizedToken);
+  try {
+    await ensureProfileSetupTokensTable();
+    const [tokenUsers] = await dbPromise.query(
+      `
+        SELECT
+          u.id,
+          u.name,
+          u.email,
+          u.contact,
+          u.role,
+          u.comp_name,
+          u.prof_img,
+          u.aadhar_no,
+          u.aadhar_img,
+          u.pan_number,
+          u.pan_img,
+          u.account_no,
+          u.bank_name,
+          u.ifsc_code,
+          u.beneficiary_name,
+          u.cancelled_cheque,
+          DATE_FORMAT(u.joining_date, '%Y-%m-%d') AS joining_date,
+          u.total_experience,
+          u.pf_enabled,
+          u.pf_number,
+          u.uan_number,
+          u.employee_pf_number,
+          u.employee_pf_amount,
+          u.employer_pf_number,
+          u.employer_pf_amount,
+          DATE_FORMAT(u.pf_joining_date, '%Y-%m-%d') AS pf_joining_date,
+          u.resume_file,
+          u.experience_file,
+          u.certification_file,
+          u.skills,
+          u.profile_setup_status,
+          pst.expires_at AS profile_setup_expires_at,
+          u.profile_setup_sent_at,
+          u.profile_setup_completed_at
+        FROM profile_setup_tokens pst
+        INNER JOIN users u ON u.id = pst.user_id
+        WHERE pst.token_hash = ?
+          AND pst.used_at IS NULL
+        LIMIT 1
+      `,
+      [tokenHash],
+    );
+
+    if (tokenUsers[0]) return tokenUsers[0];
+  } catch (err) {
+    console.error("Profile setup token history lookup failed:", err);
+  }
+
   const [users] = await dbPromise.query(
     `
       SELECT
@@ -5781,6 +5912,10 @@ app.post("/api/profile-setup/:token", (req, res) => {
           user.id,
         ],
       );
+
+      await markProfileSetupTokensUsed(user.id).catch((tokenErr) => {
+        console.error("Profile setup token used marker failed:", tokenErr);
+      });
 
       const submittedProfile = {
         ...user,
