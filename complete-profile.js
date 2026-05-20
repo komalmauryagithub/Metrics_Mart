@@ -16,7 +16,13 @@ const PROFILE_BASE_URL =
   ["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://localhost:3000"
     : window.location.origin || "https://metrics-mart.onrender.com";
-const profileToken = new URLSearchParams(window.location.search).get("token") || "";
+const profileSearchParams = new URLSearchParams(window.location.search);
+function normalizeProfileToken(value) {
+  const tokenMatch = String(value || "").match(/[a-f0-9]{64}/i);
+  return tokenMatch ? tokenMatch[0] : "";
+}
+const profileToken = normalizeProfileToken(profileSearchParams.get("token"));
+const profileUserId = String(profileSearchParams.get("uid") || "").replace(/\D/g, "");
 const profileForm = document.getElementById("completeProfileForm");
 const pfEnabledField = document.getElementById("pf_enabled");
 const pfDetails = document.getElementById("pfDetails");
@@ -26,7 +32,10 @@ const statusBanner = document.getElementById("statusBanner");
 const statusBadge = document.getElementById("statusBadge");
 
 if (window.location.protocol === "file:") {
-  const nextUrl = `${PROFILE_BASE_URL}/complete-profile.html${profileToken ? `?token=${encodeURIComponent(profileToken)}` : ""}`;
+  const nextParams = new URLSearchParams();
+  if (profileToken) nextParams.set("token", profileToken);
+  if (profileUserId) nextParams.set("uid", profileUserId);
+  const nextUrl = `${PROFILE_BASE_URL}/complete-profile.html${nextParams.toString() ? `?${nextParams.toString()}` : ""}`;
   window.location.replace(nextUrl);
 }
 
@@ -36,6 +45,7 @@ function setStatusBadge(status) {
     pending: "Link Active",
     completed: "Completed",
     expired: "Expired",
+    invalid: "Invalid Link",
     not_sent: "Pending",
   };
 
@@ -277,6 +287,13 @@ async function loadProfileForm() {
   }
 
   try {
+    const profileUrl = new URL(window.location.href);
+    if (profileUrl.searchParams.get("token") !== profileToken) {
+      profileUrl.searchParams.set("token", profileToken);
+      if (profileUserId) profileUrl.searchParams.set("uid", profileUserId);
+      window.history.replaceState(null, "", profileUrl.toString());
+    }
+
     const response = await fetch(
       `${PROFILE_BASE_URL}/api/profile-setup/${encodeURIComponent(profileToken)}`,
       {
@@ -286,7 +303,7 @@ async function loadProfileForm() {
     const result = await parseJsonResponse(response);
 
     if (!response.ok || !result.success || !result.data) {
-      setStatusBadge(response.status === 410 ? "expired" : "pending");
+      setStatusBadge(response.status === 410 ? "expired" : "invalid");
       disableForm(
         result.message || "Unable to load your profile form right now.",
         response.status === 410 ? "error" : "error",
@@ -299,7 +316,7 @@ async function loadProfileForm() {
     setBanner("Fill the remaining details below and submit once you are done.", "success");
   } catch (err) {
     console.error("Profile form load failed:", err);
-    setStatusBadge("expired");
+    setStatusBadge("invalid");
     disableForm("Unable to load your profile form right now. Please try again later.");
   }
 }
