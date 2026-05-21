@@ -156,10 +156,12 @@ function setupUserRegistration() {
   const closeModalBtn = document.getElementById("hrUserModalCloseBtn");
   const modal = document.getElementById("hrUserRegistrationModal");
   const form = document.getElementById("hrRegisterForm");
+  const captureFaceBtn = document.getElementById("hrAttendanceFaceCaptureBtn");
 
   createUserBtn?.addEventListener("click", openHrUserForm);
   closeModalBtn?.addEventListener("click", closeHrUserForm);
   form?.addEventListener("submit", submitHrUserRegistration);
+  captureFaceBtn?.addEventListener("click", captureHrAttendanceFaceEnrollment);
 
   modal?.addEventListener("click", (event) => {
     if (event.target === modal) {
@@ -2825,6 +2827,68 @@ function logout() {
   window.location.href = "mp.html";
 }
 
+function setHrAttendanceFaceStatus(message, type = "neutral") {
+  const status = document.getElementById("hrAttendanceFaceStatus");
+  if (!status) return;
+
+  status.textContent = message || "";
+  status.dataset.type = type;
+}
+
+function clearHrAttendanceFaceCapture(message, type = "neutral") {
+  const form = document.getElementById("hrRegisterForm");
+  if (form?.elements?.attendance_face_image) {
+    form.elements.attendance_face_image.value = "";
+  }
+  if (form?.elements?.attendance_face_signature) {
+    form.elements.attendance_face_signature.value = "";
+  }
+
+  setHrAttendanceFaceStatus(
+    message || "Employee can also complete this from profile setup link.",
+    type,
+  );
+}
+
+async function captureHrAttendanceFaceEnrollment() {
+  const button = document.getElementById("hrAttendanceFaceCaptureBtn");
+  const form = document.getElementById("hrRegisterForm");
+
+  if (!window.AttendanceFace?.captureEnrollment) {
+    setHrAttendanceFaceStatus("Camera module is not loaded.", "error");
+    return;
+  }
+
+  try {
+    if (button) button.disabled = true;
+    setHrAttendanceFaceStatus("Opening camera...", "neutral");
+    const payload = await window.AttendanceFace.captureEnrollment({
+      title: "Private Attendance Face Setup",
+      actionLabel: "Save Face",
+    });
+
+    if (!payload?.faceImage || !payload?.faceSignature) {
+      throw new Error("Face capture failed. Please retry.");
+    }
+
+    if (form?.elements?.attendance_face_image) {
+      form.elements.attendance_face_image.value = payload.faceImage;
+    }
+    if (form?.elements?.attendance_face_signature) {
+      form.elements.attendance_face_signature.value = JSON.stringify(payload.faceSignature);
+    }
+
+    setHrAttendanceFaceStatus("Live face photo captured privately.", "success");
+  } catch (error) {
+    setHrAttendanceFaceStatus(
+      error.message || "Face capture failed. Please retry.",
+      "error",
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function openHrUserForm() {
   const modal = document.getElementById("hrUserRegistrationModal");
   if (!modal) return;
@@ -2870,6 +2934,8 @@ function resetHrUserForm() {
   if (joiningField) {
     joiningField.value = getTodayKey();
   }
+
+  clearHrAttendanceFaceCapture();
 }
 
 async function populateHrNextEmployeeCode() {
