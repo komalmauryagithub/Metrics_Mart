@@ -7,6 +7,7 @@ const multer = require("multer");
 const nodemailer = require("nodemailer");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
 const rawLeaveRoleLeaderEmails = require("./leave-leader-config.json");
 const converter = require("number-to-words");
 const PDFDocument = require("pdfkit");
@@ -1162,7 +1163,9 @@ function normalizeInviteMailerFlag(value) {
 
 function getFirstEmailEnvValue(keys) {
   for (const key of keys) {
-    const value = String(process.env[key] || "").trim();
+    const value = String(process.env[key] || "")
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
     if (value) return value;
   }
 
@@ -1173,11 +1176,29 @@ function getFirstEmailEnvRawValue(keys) {
   for (const key of keys) {
     if (process.env[key] == null) continue;
 
-    const value = String(process.env[key]).trim();
+    const value = String(process.env[key])
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
     if (value) return value;
   }
 
   return undefined;
+}
+
+function normalizeMailerPasswordForProvider(password, emailAddress) {
+  const normalizedPassword = String(password || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+  const domain = String(emailAddress || "")
+    .trim()
+    .toLowerCase()
+    .split("@")[1] || "";
+
+  if (["gmail.com", "googlemail.com"].includes(domain)) {
+    return normalizedPassword.replace(/\s+/g, "");
+  }
+
+  return normalizedPassword;
 }
 
 function inferProfileInviteMailerPreset(emailAddress) {
@@ -1316,6 +1337,7 @@ function getProfileInviteMailerConfig() {
   const host = String(envHost || inferredPreset?.host || "").trim();
   const port = Number(envPort || inferredPreset?.port || 0);
   const fromName = DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
+  const authPassword = normalizeMailerPasswordForProvider(pass, user || fromAddress);
   const secure = secureEnv != null
     ? normalizeInviteMailerFlag(secureEnv)
     : inferredPreset?.secure ?? port === 465;
@@ -1362,7 +1384,7 @@ function getProfileInviteMailerConfig() {
         ? {
             auth: {
               user,
-              pass,
+              pass: authPassword,
             },
           }
         : {}),
@@ -1986,6 +2008,347 @@ function buildPasswordResetPayload(req, user, token, expiresAt, otpCode, otpExpi
   };
 }
 
+function normalizeEmailApiProvider(value = "") {
+  const provider = String(value || "").trim().toLowerCase();
+  if (["resend", "sendgrid", "brevo"].includes(provider)) return provider;
+  return "";
+}
+
+function getEmailApiConfig() {
+  const explicitProvider = normalizeEmailApiProvider(
+    getFirstEmailEnvValue(["EMAIL_API_PROVIDER", "MAIL_API_PROVIDER"]),
+  );
+  const resendApiKey = getFirstEmailEnvValue(["RESEND_API_KEY"]);
+  const brevoApiKey = getFirstEmailEnvValue(["BREVO_API_KEY", "SENDINBLUE_API_KEY"]);
+  const sendGridApiKey = getFirstEmailEnvValue(["SENDGRID_API_KEY"]);
+  const provider =
+    explicitProvider ||
+    (resendApiKey ? "resend" : brevoApiKey ? "brevo" : sendGridApiKey ? "sendgrid" : "");
+  const apiKey =
+    provider === "resend"
+      ? resendApiKey
+      : provider === "brevo"
+        ? brevoApiKey
+        : provider === "sendgrid"
+          ? sendGridApiKey
+          : "";
+  const fromEmail =
+    getFirstEmailEnvValue([
+      "EMAIL_API_FROM",
+      "EMAIL_API_FROM_EMAIL",
+      "RESEND_FROM",
+      "RESEND_FROM_EMAIL",
+      "BREVO_FROM",
+      "BREVO_FROM_EMAIL",
+      "SENDGRID_FROM",
+      "SENDGRID_FROM_EMAIL",
+      "SMTP_FROM",
+      "SMTP_FROM_EMAIL",
+      "EMAIL_FROM",
+      "EMAIL_FROM_ADDRESS",
+      "FROM_EMAIL",
+      "SENDER_EMAIL",
+    ]) || "";
+  const fromName =
+    getFirstEmailEnvValue([
+      "EMAIL_API_FROM_NAME",
+      "RESEND_FROM_NAME",
+      "BREVO_FROM_NAME",
+      "SENDGRID_FROM_NAME",
+      "SMTP_FROM_NAME",
+      "EMAIL_FROM_NAME",
+    ]) || DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
+
+  if (!provider || !apiKey || !fromEmail) {
+    return {
+      configured: false,
+      provider,
+      missingConfig: [
+        !provider ? "EMAIL_API_PROVIDER or provider API key" : "",
+        !apiKey ? `${(provider || "EMAIL_API").toUpperCase()}_API_KEY` : "",
+        !fromEmail ? "EMAIL_API_FROM" : "",
+      ].filter(Boolean),
+    };
+  }
+
+  return {
+    configured: true,
+    provider,
+    apiKey,
+    fromEmail,
+    fromName,
+  };
+}
+
+function getEmailApiEndpoint(provider) {
+  if (provider === "resend") {
+    return getFirstEmailEnvValue(["RESEND_API_URL"]) || "https://api.resend.com/emails";
+  }
+
+  if (provider === "brevo") {
+    return getFirstEmailEnvValue(["BREVO_API_URL", "SENDINBLUE_API_URL"]) ||
+      "https://api.brevo.com/v3/smtp/email";
+  }
+
+  if (provider === "sendgrid") {
+    return getFirstEmailEnvValue(["SENDGRID_API_URL"]) ||
+      "https://api.sendgrid.com/v3/mail/send";
+  }
+
+  return "";
+}
+
+function getEmailApiProviderLabel(provider) {
+  if (provider === "resend") return "Resend";
+  if (provider === "brevo") return "Brevo";
+  if (provider === "sendgrid") return "SendGrid";
+  return "Email API";
+}
+
+function splitEmailAddressAndName(value, fallbackName = "") {
+  const rawValue = String(value || "").trim();
+  const match = rawValue.match(/^(.*?)<([^>]+)>$/);
+  if (match) {
+    return {
+      name: String(match[1] || "").replace(/^['"]|['"]$/g, "").trim() || fallbackName,
+      email: String(match[2] || "").trim(),
+    };
+  }
+
+  return {
+    name: fallbackName,
+    email: rawValue,
+  };
+}
+
+function buildFriendlyFromAddress(email, name) {
+  const parsed = splitEmailAddressAndName(email, name);
+  if (!parsed.email) return "";
+  return parsed.name ? `${parsed.name} <${parsed.email}>` : parsed.email;
+}
+
+function postJsonViaHttps(url, headers, payload, timeoutMs = 25000) {
+  return new Promise((resolve, reject) => {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch (_err) {
+      const error = new Error("Email API URL is invalid.");
+      error.code = "EMAIL_API_BAD_URL";
+      reject(error);
+      return;
+    }
+
+    const body = JSON.stringify(payload);
+    const request = https.request(
+      {
+        method: "POST",
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || 443,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          ...headers,
+        },
+        timeout: timeoutMs,
+      },
+      (response) => {
+        let responseBody = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        response.on("end", () => {
+          const statusCode = Number(response.statusCode || 0);
+          let json = null;
+          if (responseBody) {
+            try {
+              json = JSON.parse(responseBody);
+            } catch (_err) {
+              json = null;
+            }
+          }
+
+          if (statusCode >= 200 && statusCode < 300) {
+            resolve({ statusCode, body: responseBody, json });
+            return;
+          }
+
+          const error = new Error(responseBody || `Email API request failed (${statusCode})`);
+          error.statusCode = statusCode;
+          error.responseBody = responseBody;
+          error.responseJson = json;
+          reject(error);
+        });
+      },
+    );
+
+    request.on("timeout", () => {
+      request.destroy(Object.assign(new Error("Email API request timed out."), {
+        code: "EMAIL_API_TIMEOUT",
+      }));
+    });
+    request.on("error", reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+function buildEmailApiPayload(config, message) {
+  const toEmail = String(message?.to || "").trim();
+  const toName = String(message?.toName || "").trim();
+  const subject = String(message?.subject || "").trim();
+  const text = String(message?.text || "").trim();
+  const html = String(message?.html || "").trim();
+  const from = splitEmailAddressAndName(config.fromEmail, config.fromName);
+
+  if (config.provider === "resend") {
+    return {
+      from: buildFriendlyFromAddress(config.fromEmail, config.fromName),
+      to: [toEmail],
+      subject,
+      text,
+      html,
+    };
+  }
+
+  if (config.provider === "brevo") {
+    return {
+      sender: {
+        name: from.name || config.fromName,
+        email: from.email,
+      },
+      to: [
+        {
+          email: toEmail,
+          ...(toName ? { name: toName } : {}),
+        },
+      ],
+      subject,
+      htmlContent: html,
+      textContent: text,
+    };
+  }
+
+  return {
+    personalizations: [
+      {
+        to: [
+          {
+            email: toEmail,
+            ...(toName ? { name: toName } : {}),
+          },
+        ],
+        subject,
+      },
+    ],
+    from: {
+      email: from.email,
+      ...(from.name ? { name: from.name } : {}),
+    },
+    subject,
+    content: [
+      {
+        type: "text/plain",
+        value: text || subject,
+      },
+      {
+        type: "text/html",
+        value: html || text || subject,
+      },
+    ],
+  };
+}
+
+function buildEmailApiHeaders(config) {
+  if (config.provider === "resend") {
+    return {
+      Authorization: `Bearer ${config.apiKey}`,
+    };
+  }
+
+  if (config.provider === "brevo") {
+    return {
+      accept: "application/json",
+      "api-key": config.apiKey,
+    };
+  }
+
+  return {
+    Authorization: `Bearer ${config.apiKey}`,
+  };
+}
+
+function getEmailApiErrorMessage(provider, error) {
+  const providerLabel = getEmailApiProviderLabel(provider);
+  const statusCode = Number(error?.statusCode || 0);
+  const responseJson = error?.responseJson || {};
+  const responseText = String(error?.responseBody || error?.message || "").slice(0, 240);
+  const message =
+    responseJson.message ||
+    responseJson.error ||
+    (Array.isArray(responseJson.errors) && responseJson.errors[0]?.message) ||
+    responseText;
+
+  if (statusCode === 401 || statusCode === 403) {
+    return `${providerLabel} API key was rejected. Check the API key in live server env.`;
+  }
+
+  if (statusCode === 400 || statusCode === 422) {
+    return `${providerLabel} rejected the email request. Check verified sender/domain and EMAIL_API_FROM. ${message || ""}`.trim();
+  }
+
+  if (String(error?.code || "").includes("TIMEOUT")) {
+    return `${providerLabel} API timed out. Please retry or check provider status.`;
+  }
+
+  return `${providerLabel} email API failed. ${message || "Check provider settings."}`.trim();
+}
+
+async function sendEmailViaApi(message) {
+  const config = getEmailApiConfig();
+  if (!config.configured) {
+    return {
+      sent: false,
+      status: "not_configured",
+      missingConfig: config.missingConfig || [],
+      message: "Email API is not configured.",
+    };
+  }
+
+  try {
+    const endpoint = getEmailApiEndpoint(config.provider);
+    const result = await postJsonViaHttps(
+      endpoint,
+      buildEmailApiHeaders(config),
+      buildEmailApiPayload(config, message),
+    );
+
+    return {
+      sent: true,
+      status: "sent",
+      provider: config.provider,
+      messageId:
+        result.json?.id ||
+        result.json?.messageId ||
+        result.json?.message_id ||
+        "",
+      message: `${getEmailApiProviderLabel(config.provider)} OTP email sent successfully.`,
+    };
+  } catch (error) {
+    console.error(`${getEmailApiProviderLabel(config.provider)} email API failed:`, error);
+    return {
+      sent: false,
+      status: "failed",
+      provider: config.provider,
+      smtpError: `EMAIL_API_${String(error?.statusCode || error?.code || "FAILED").toUpperCase()}`,
+      message: getEmailApiErrorMessage(config.provider, error),
+    };
+  }
+}
+
 function getSmtpErrorText(err) {
   return [
     err?.code,
@@ -2100,6 +2463,18 @@ async function sendPasswordResetEmail(resetRequest, user) {
   }
 
   const mailer = getProfileInviteMailerTransport();
+  const apiDispatch = await sendEmailViaApi({
+    to: inviteEmail,
+    toName: String(user?.name || "").trim(),
+    subject: resetRequest.subject,
+    text: resetRequest.body,
+    html: buildPasswordResetEmailHtml(resetRequest, user),
+  });
+
+  if (apiDispatch.sent || apiDispatch.status === "failed") {
+    return apiDispatch;
+  }
+
   if (!mailer.configured || !mailer.transport) {
     const missingConfig = Array.isArray(mailer.missingConfig)
       ? mailer.missingConfig
