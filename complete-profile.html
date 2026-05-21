@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Complete Profile | Metrics Mart</title>
+    <link rel="stylesheet" href="attendance-face.css" />
     <link rel="stylesheet" href="complete-profile.css" />
   </head>
   <body>
@@ -209,6 +210,23 @@
           </div>
         </section>
 
+        <section class="form-card attendance-face-enrollment-card">
+          <div class="attendance-face-row">
+            <div class="attendance-face-copy">
+              <h3>Attendance Face Setup</h3>
+              <p>Private live photo for attendance matching.</p>
+            </div>
+            <button id="captureAttendanceFaceBtn" type="button" class="attendance-face-capture-btn">
+              Capture Live Face
+            </button>
+          </div>
+          <input id="attendance_face_image" type="hidden" name="attendance_face_image" />
+          <input id="attendance_face_signature" type="hidden" name="attendance_face_signature" />
+          <p id="attendanceFaceEnrollmentStatus" class="attendance-face-enrollment-status" data-type="neutral">
+            Face setup pending.
+          </p>
+        </section>
+
         <div id="formMessage" class="form-message hidden"></div>
 
         <button id="submitBtn" type="submit" class="submit-btn">
@@ -217,6 +235,7 @@
       </form>
     </main>
 
-    <script src="complete-profile.js?v=20260520-2"></script>
+    <script src="attendance-face.js?v=20260521-1"></script>
+    <script src="complete-profile.js?v=20260521-1"></script>
   </body>
 </html>
