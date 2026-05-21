@@ -30,6 +30,11 @@ const submitBtn = document.getElementById("submitBtn");
 const formMessage = document.getElementById("formMessage");
 const statusBanner = document.getElementById("statusBanner");
 const statusBadge = document.getElementById("statusBadge");
+const attendanceFaceImageInput = document.getElementById("attendance_face_image");
+const attendanceFaceSignatureInput = document.getElementById("attendance_face_signature");
+const attendanceFaceCaptureBtn = document.getElementById("captureAttendanceFaceBtn");
+const attendanceFaceStatus = document.getElementById("attendanceFaceEnrollmentStatus");
+let attendanceFaceAlreadyEnrolled = false;
 
 if (window.location.protocol === "file:") {
   const nextParams = new URLSearchParams();
@@ -95,6 +100,47 @@ function setFieldHint(id, text = "") {
   const element = document.getElementById(id);
   if (element) {
     element.textContent = text;
+  }
+}
+
+function setAttendanceFaceStatus(message, type = "neutral") {
+  if (!attendanceFaceStatus) return;
+  attendanceFaceStatus.textContent = message || "";
+  attendanceFaceStatus.dataset.type = type;
+}
+
+function hasCapturedAttendanceFace() {
+  return Boolean(
+    String(attendanceFaceImageInput?.value || "").trim() &&
+      String(attendanceFaceSignatureInput?.value || "").trim(),
+  );
+}
+
+async function captureAttendanceFaceEnrollment() {
+  if (!window.AttendanceFace?.captureEnrollment) {
+    setAttendanceFaceStatus("Camera module is not loaded.", "error");
+    return;
+  }
+
+  try {
+    attendanceFaceCaptureBtn.disabled = true;
+    setAttendanceFaceStatus("Opening camera...", "neutral");
+    const payload = await window.AttendanceFace.captureEnrollment({
+      title: "Private Attendance Face Setup",
+      actionLabel: "Save Face",
+    });
+
+    if (!payload?.faceImage || !payload?.faceSignature) {
+      throw new Error("Face capture failed. Please retry.");
+    }
+
+    attendanceFaceImageInput.value = payload.faceImage;
+    attendanceFaceSignatureInput.value = JSON.stringify(payload.faceSignature);
+    setAttendanceFaceStatus("Live face photo captured privately.", "success");
+  } catch (err) {
+    setAttendanceFaceStatus(err.message || "Face capture failed. Please retry.", "error");
+  } finally {
+    attendanceFaceCaptureBtn.disabled = false;
   }
 }
 
@@ -207,6 +253,16 @@ function populateSummary(user) {
 }
 
 function populateForm(user) {
+  attendanceFaceAlreadyEnrolled = Boolean(user.attendance_face_enrolled);
+  if (attendanceFaceImageInput) attendanceFaceImageInput.value = "";
+  if (attendanceFaceSignatureInput) attendanceFaceSignatureInput.value = "";
+  setAttendanceFaceStatus(
+    attendanceFaceAlreadyEnrolled
+      ? "Face setup already saved. Capture again only to replace it."
+      : "Face setup pending.",
+    attendanceFaceAlreadyEnrolled ? "success" : "neutral",
+  );
+
   setFieldValue("aadhar_no", user.aadhar_no || "");
   setFieldValue("pan_number", user.pan_number || "");
   setFieldValue("bank_name", user.bank_name || "");
@@ -337,6 +393,12 @@ async function handleProfileSubmit(event) {
     return;
   }
 
+  if (!attendanceFaceAlreadyEnrolled && !hasCapturedAttendanceFace()) {
+    setFormMessage("Live face photo capture is required for attendance verification.", "error");
+    setAttendanceFaceStatus("Capture live face before submitting.", "error");
+    return;
+  }
+
   setSubmittingState(true);
 
   try {
@@ -380,6 +442,10 @@ if (profileForm?.elements?.ifsc_code) {
   profileForm.elements.ifsc_code.addEventListener("input", (event) => {
     event.target.value = String(event.target.value || "").toUpperCase();
   });
+}
+
+if (attendanceFaceCaptureBtn) {
+  attendanceFaceCaptureBtn.addEventListener("click", captureAttendanceFaceEnrollment);
 }
 
 if (profileForm) {
