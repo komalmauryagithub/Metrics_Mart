@@ -1273,10 +1273,15 @@ function getProfileInviteMailerConfig() {
   const user = getFirstEmailEnvValue([
     "SMTP_USER",
     "SMTP_USERNAME",
+    "SMTP_EMAIL",
+    "SMTP_MAIL",
     "EMAIL_USER",
     "EMAIL_USERNAME",
     "EMAIL_ADDRESS",
     "EMAIL",
+    "FROM_EMAIL",
+    "SENDER_EMAIL",
+    "MAIL_FROM_ADDRESS",
     "MAIL_USER",
     "MAIL_USERNAME",
     "MAIL_EMAIL",
@@ -1288,6 +1293,7 @@ function getProfileInviteMailerConfig() {
     "SMTP_PASSWORD",
     "EMAIL_PASS",
     "EMAIL_PASSWORD",
+    "EMAIL_APP_PASSWORD",
     "MAIL_PASS",
     "MAIL_PASSWORD",
     "GMAIL_PASS",
@@ -1295,15 +1301,20 @@ function getProfileInviteMailerConfig() {
     "GMAIL_APP_PASSWORD",
     "APP_PASSWORD",
   ]);
-  const inferredPreset = inferProfileInviteMailerPreset(user);
-  const host = String(envHost || inferredPreset?.host || "").trim();
-  const port = Number(envPort || inferredPreset?.port || 0);
   const fromAddress = getFirstEmailEnvValue([
     "SMTP_FROM",
+    "SMTP_FROM_EMAIL",
     "EMAIL_FROM",
+    "EMAIL_FROM_ADDRESS",
+    "FROM_EMAIL",
+    "SENDER_EMAIL",
     "MAIL_FROM",
+    "MAIL_FROM_ADDRESS",
     "MAILER_FROM",
   ]) || user;
+  const inferredPreset = inferProfileInviteMailerPreset(user || fromAddress);
+  const host = String(envHost || inferredPreset?.host || "").trim();
+  const port = Number(envPort || inferredPreset?.port || 0);
   const fromName = DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
   const secure = secureEnv != null
     ? normalizeInviteMailerFlag(secureEnv)
