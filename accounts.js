@@ -865,13 +865,19 @@ async function markAttendance(type) {
   try {
     attendanceUpdating = true;
     setAttendanceButtonsDisabled(true);
+    if (!window.AttendanceFace?.captureForAttendance) {
+      throw new Error("Face verification module load nahi hua. Page refresh karke retry karo.");
+    }
+    const facePayload = await window.AttendanceFace.captureForAttendance({
+      actionLabel: type === "check-in" ? "Verify Check In" : "Verify Check Out",
+    });
     const location = await getCurrentLocation();
     const response = await fetch(url, {
       method,
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ userId: currentUser.id, ...location }),
+      body: JSON.stringify({ userId: currentUser.id, ...location, ...facePayload }),
     });
     const result = await response.json();
 
