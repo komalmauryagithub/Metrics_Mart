@@ -45,6 +45,23 @@ function handleForgotPasswordBackdrop(event) {
   }
 }
 
+async function parseApiResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    const normalized = text.trim();
+    return {
+      success: false,
+      message: normalized.startsWith("<")
+        ? "Server returned an error page instead of JSON. Please check the live server deployment and logs."
+        : normalized.slice(0, 240) || "Invalid response from server",
+    };
+  }
+}
+
 // Popup Functions
 function showPopup(title, message, isSuccess) {
   const popup = document.getElementById('popup');
@@ -107,9 +124,9 @@ document.getElementById('registerFormElement').addEventListener('submit', async 
 
   try {
     const response = await fetch(`${BASE_URL}/register`, { method: 'POST', body: formData });
-    const result = await response.json();
+    const result = await parseApiResponse(response);
 
-    if (result.success) {
+    if (response.ok && result.success) {
       showPopup('Success!', result.message || 'Registration successful!', true);
       this.reset();
     } else {
@@ -144,9 +161,9 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
       body
     });
 
-    const data = await res.json();
+    const data = await parseApiResponse(res);
 
-    if (data.success) {
+    if (res.ok && data.success) {
       localStorage.setItem("currentUser", JSON.stringify(data.user));
 
       const redirectPage = getRedirectPage(data.user?.role);
@@ -200,7 +217,7 @@ if (forgotPasswordForm) {
         },
         body: JSON.stringify(payload),
       });
-      const result = await res.json();
+      const result = await parseApiResponse(res);
 
       if (!res.ok || !result.success) {
         throw new Error(result.message || "Unable to reset password");
@@ -237,51 +254,4 @@ if (forgotPasswordForm) {
 }
 
 
-// const loginForm = document.getElementById('loginFormElement');
 
-// if (loginForm) {
-//   loginForm.addEventListener('submit', async function(e) {
-//     e.preventDefault();
-
-//     const emailOrContact = this.emailOrContact.value;
-//     const password = this.password.value;
-
-//     try {
-//       const response = await fetch('/login', {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify({ emailOrContact, password })
-//       });
-
-//       const result = await response.json();
-
-//       if (result.success) {
-//         const userRole = result.user.role.toLowerCase();
-
-//         localStorage.setItem('currentUser', JSON.stringify(result.user));
-
-//         let redirectPage = '';
-
-//         switch(userRole) {
-//           case 'admin': redirectPage = 'admin.html'; break;
-//           case 'tme': redirectPage = 'tme.html'; break;
-//           case 'me': redirectPage = 'me.html'; break;
-//           case 'dev': redirectPage = 'dev.html'; break;
-//           default: redirectPage = 'index.html';
-//         }
-
-//         showPopup('Welcome!', `Login successful as ${userRole.toUpperCase()}`, true);
-
-//         setTimeout(() => {
-//           window.location.href = redirectPage;
-//         }, 1500);
-
-//       } else {
-//         showPopup('Login Failed', result.message, false);
-//       }
-
-//     } catch (error) {
-//       showPopup('Error', 'Server error', false);
-//     }
-//   });
-// }
