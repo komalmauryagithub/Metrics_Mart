@@ -92,8 +92,8 @@ app.use(
   }),
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "8mb" }));
+app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 
 const DEAL_PRODUCT_CATALOG = [
   { name: "GMB SEO", price: 15000, group: "SEO Services" },
@@ -223,7 +223,11 @@ const PUBLIC_APP_URL = String(
 const BASE_URL = PUBLIC_APP_URL || "http://localhost:3000";
 const LOCAL_PASSWORD_RESET_COOKIE = "mm_local_password_reset";
 const DEFAULT_EMAIL_FROM_NAME = String(
-  process.env.SMTP_FROM_NAME || process.env.EMAIL_FROM_NAME || "Metrics Mart Admin",
+  process.env.SMTP_FROM_NAME ||
+    process.env.EMAIL_FROM_NAME ||
+    process.env.MAIL_FROM_NAME ||
+    process.env.MAILER_FROM_NAME ||
+    "Metrics Mart Admin",
 ).trim();
 const EMPLOYEE_CODE_PREFIX = "EMP";
 const EMPLOYEE_CODE_PAD_LENGTH = 4;
@@ -658,8 +662,8 @@ async function getAutoTargetIncentiveForPayroll({ user, monthKey, basicSalary })
 }
 
 // ====================== MIDDLEWARE ======================
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: "8mb" }));
+app.use(express.json({ limit: "8mb" }));
 app.use(express.static(__dirname));
 
 // ====================== MULTER SETUP ======================
@@ -760,6 +764,209 @@ function getDatabaseErrorMessage(err, fallback = "Database error") {
 
 function hasBodyField(body, fieldName) {
   return Object.prototype.hasOwnProperty.call(body || {}, fieldName);
+}
+
+const ATTENDANCE_FACE_IMAGE_MAX_BYTES = 650 * 1024;
+const ATTENDANCE_FACE_SIGNATURE_HASH_LENGTH = 64;
+const ATTENDANCE_FACE_SIGNATURE_HISTOGRAM_LENGTH = 12;
+const ATTENDANCE_FACE_MATCH_THRESHOLD = Math.min(
+  0.95,
+  Math.max(0.45, Number(process.env.ATTENDANCE_FACE_MATCH_THRESHOLD || 0.62)),
+);
+
+function createRequestError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function normalizeAttendanceFaceImage(value, { required = false } = {}) {
+  const image = String(value || "").trim();
+
+  if (!image) {
+    if (required) {
+      throw createRequestError("Live face photo is required for attendance.");
+    }
+    return "";
+  }
+
+  const match = image.match(/^data:image\/(jpeg|jpg|png|webp);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    throw createRequestError("Invalid face photo format. Please capture a live photo again.");
+  }
+
+  const base64 = match[2].replace(/\s/g, "");
+  const sizeBytes = Buffer.byteLength(base64, "base64");
+  if (!sizeBytes || sizeBytes > ATTENDANCE_FACE_IMAGE_MAX_BYTES) {
+    throw createRequestError("Face photo is too large. Please capture it again.");
+  }
+
+  return `data:image/${match[1].toLowerCase().replace("jpg", "jpeg")};base64,${base64}`;
+}
+
+function normalizeAttendanceFaceSignature(value, { required = false } = {}) {
+  let signature = value;
+
+  if (typeof signature === "string") {
+    const trimmed = signature.trim();
+    if (!trimmed) {
+      if (required) {
+        throw createRequestError("Face verification data is required.");
+      }
+      return null;
+    }
+
+    try {
+      signature = JSON.parse(trimmed);
+    } catch (_err) {
+      throw createRequestError("Invalid face verification data. Please capture your face again.");
+    }
+  }
+
+  if (!signature || typeof signature !== "object") {
+    if (required) {
+      throw createRequestError("Face verification data is required.");
+    }
+    return null;
+  }
+
+  const hash = String(signature.hash || "").replace(/[^01]/g, "");
+  const histogram = Array.isArray(signature.histogram)
+    ? signature.histogram.map((value) => Number(value))
+    : [];
+  const brightness = Number(signature.brightness);
+
+  if (
+    hash.length !== ATTENDANCE_FACE_SIGNATURE_HASH_LENGTH ||
+    histogram.length !== ATTENDANCE_FACE_SIGNATURE_HISTOGRAM_LENGTH ||
+    histogram.some((value) => !Number.isFinite(value) || value < 0) ||
+    !Number.isFinite(brightness)
+  ) {
+    throw createRequestError("Invalid face verification data. Please capture your face again.");
+  }
+
+  return {
+    version: 1,
+    hash,
+    histogram: histogram.map((value) => Number(value.toFixed(6))),
+    brightness: Number(Math.max(0, Math.min(255, brightness)).toFixed(2)),
+    width: Number(signature.width || 0) || null,
+    height: Number(signature.height || 0) || null,
+    capturedAt: String(signature.capturedAt || new Date().toISOString()).slice(0, 40),
+  };
+}
+
+function readAttendanceFaceSubmission(body, { required = false } = {}) {
+  const faceImage = normalizeAttendanceFaceImage(
+    body?.attendance_face_image || body?.faceImage,
+    { required },
+  );
+  const faceSignature = normalizeAttendanceFaceSignature(
+    body?.attendance_face_signature || body?.faceSignature,
+    { required },
+  );
+
+  if (!faceImage && !faceSignature) return null;
+  if (!faceImage || !faceSignature) {
+    throw createRequestError("Face photo and verification data are both required.");
+  }
+
+  return {
+    image: faceImage,
+    signature: faceSignature,
+    signatureJson: JSON.stringify(faceSignature),
+  };
+}
+
+function compareAttendanceFaceSignatures(storedSignature, liveSignature) {
+  const stored = normalizeAttendanceFaceSignature(storedSignature, { required: true });
+  const live = normalizeAttendanceFaceSignature(liveSignature, { required: true });
+
+  let matchingBits = 0;
+  for (let index = 0; index < ATTENDANCE_FACE_SIGNATURE_HASH_LENGTH; index += 1) {
+    if (stored.hash[index] === live.hash[index]) matchingBits += 1;
+  }
+
+  const hashScore = matchingBits / ATTENDANCE_FACE_SIGNATURE_HASH_LENGTH;
+  let histogramIntersection = 0;
+  let histogramUnion = 0;
+
+  for (let index = 0; index < ATTENDANCE_FACE_SIGNATURE_HISTOGRAM_LENGTH; index += 1) {
+    const storedValue = Number(stored.histogram[index] || 0);
+    const liveValue = Number(live.histogram[index] || 0);
+    histogramIntersection += Math.min(storedValue, liveValue);
+    histogramUnion += Math.max(storedValue, liveValue);
+  }
+
+  const histogramScore = histogramUnion > 0 ? histogramIntersection / histogramUnion : 0;
+  const brightnessScore = 1 - Math.min(Math.abs(stored.brightness - live.brightness) / 255, 1);
+  const score = (hashScore * 0.6) + (histogramScore * 0.3) + (brightnessScore * 0.1);
+
+  return Number(score.toFixed(4));
+}
+
+async function saveAttendanceFaceEnrollment(userId, submission) {
+  if (!submission) return false;
+
+  await ensureAttendanceFaceColumns();
+  await dbPromise.query(
+    `
+      UPDATE users
+      SET
+        attendance_face_image = ?,
+        attendance_face_signature = ?,
+        attendance_face_enrolled_at = NOW()
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [submission.image, submission.signatureJson, userId],
+  );
+
+  return true;
+}
+
+async function verifyAttendanceFaceForUser(userId, body) {
+  const liveFace = readAttendanceFaceSubmission(body, { required: true });
+  await ensureAttendanceFaceColumns();
+
+  const [users] = await dbPromise.query(
+    `
+      SELECT
+        id,
+        attendance_face_signature,
+        attendance_face_enrolled_at
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  if (!users.length) {
+    throw createRequestError("Invalid user id", 400);
+  }
+
+  const user = users[0];
+  if (!user.attendance_face_signature || !user.attendance_face_enrolled_at) {
+    throw createRequestError(
+      "Face setup missing. Please complete live face setup before marking attendance.",
+      400,
+    );
+  }
+
+  const matchScore = compareAttendanceFaceSignatures(
+    user.attendance_face_signature,
+    liveFace.signature,
+  );
+
+  if (matchScore < ATTENDANCE_FACE_MATCH_THRESHOLD) {
+    throw createRequestError(
+      "Face verification failed. Please retry with your registered face.",
+      403,
+    );
+  }
+
+  return { score: matchScore };
 }
 
 function normalizeProfileSkillValue(value) {
@@ -953,6 +1160,26 @@ function normalizeInviteMailerFlag(value) {
   );
 }
 
+function getFirstEmailEnvValue(keys) {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim();
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function getFirstEmailEnvRawValue(keys) {
+  for (const key of keys) {
+    if (process.env[key] == null) continue;
+
+    const value = String(process.env[key]).trim();
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
 function inferProfileInviteMailerPreset(emailAddress) {
   const normalizedEmail = String(emailAddress || "").trim().toLowerCase();
   const domain = normalizedEmail.split("@")[1] || "";
@@ -1010,18 +1237,73 @@ function buildProfileInviteMailerMissingBaseConfigMessage(missingKeys, hasAuthCr
   );
 }
 
+function buildPasswordResetMailerMissingConfigMessage(missingKeys) {
+  const keys = Array.isArray(missingKeys)
+    ? missingKeys.filter((key) => String(key || "").trim())
+    : [];
+  const suffix = keys.length
+    ? ` Missing server config: ${keys.join(", ")}.`
+    : "";
+
+  return `Email service is not configured for password reset OTP yet.${suffix}`;
+}
+
 function getProfileInviteMailerConfig() {
-  const envHost = String(process.env.SMTP_HOST || process.env.EMAIL_HOST || "").trim();
-  const envPort = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 0);
-  const secureEnv = process.env.SMTP_SECURE ?? process.env.EMAIL_SECURE;
-  const user = String(process.env.SMTP_USER || process.env.EMAIL_USER || "").trim();
-  const pass = String(process.env.SMTP_PASS || process.env.EMAIL_PASS || "").trim();
+  const envHost = getFirstEmailEnvValue([
+    "SMTP_HOST",
+    "EMAIL_HOST",
+    "MAIL_HOST",
+    "MAILER_HOST",
+    "SMTP_SERVER",
+  ]);
+  const envPort = Number(
+    getFirstEmailEnvValue([
+      "SMTP_PORT",
+      "EMAIL_PORT",
+      "MAIL_PORT",
+      "MAILER_PORT",
+    ]) || 0,
+  );
+  const secureEnv = getFirstEmailEnvRawValue([
+    "SMTP_SECURE",
+    "EMAIL_SECURE",
+    "MAIL_SECURE",
+    "MAILER_SECURE",
+  ]);
+  const user = getFirstEmailEnvValue([
+    "SMTP_USER",
+    "SMTP_USERNAME",
+    "EMAIL_USER",
+    "EMAIL_USERNAME",
+    "EMAIL_ADDRESS",
+    "EMAIL",
+    "MAIL_USER",
+    "MAIL_USERNAME",
+    "MAIL_EMAIL",
+    "GMAIL_USER",
+    "GMAIL_EMAIL",
+  ]);
+  const pass = getFirstEmailEnvValue([
+    "SMTP_PASS",
+    "SMTP_PASSWORD",
+    "EMAIL_PASS",
+    "EMAIL_PASSWORD",
+    "MAIL_PASS",
+    "MAIL_PASSWORD",
+    "GMAIL_PASS",
+    "GMAIL_PASSWORD",
+    "GMAIL_APP_PASSWORD",
+    "APP_PASSWORD",
+  ]);
   const inferredPreset = inferProfileInviteMailerPreset(user);
   const host = String(envHost || inferredPreset?.host || "").trim();
   const port = Number(envPort || inferredPreset?.port || 0);
-  const fromAddress = String(
-    process.env.SMTP_FROM || process.env.EMAIL_FROM || user,
-  ).trim();
+  const fromAddress = getFirstEmailEnvValue([
+    "SMTP_FROM",
+    "EMAIL_FROM",
+    "MAIL_FROM",
+    "MAILER_FROM",
+  ]) || user;
   const fromName = DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
   const secure = secureEnv != null
     ? normalizeInviteMailerFlag(secureEnv)
@@ -1705,11 +1987,15 @@ async function sendPasswordResetEmail(resetRequest, user) {
 
   const mailer = getProfileInviteMailerTransport();
   if (!mailer.configured || !mailer.transport) {
+    const missingConfig = Array.isArray(mailer.missingConfig)
+      ? mailer.missingConfig
+      : [];
+
     return {
       sent: false,
       status: "skipped",
-      message: mailer.reason || "Automatic email is not configured on the server yet.",
-      missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
+      message: buildPasswordResetMailerMissingConfigMessage(missingConfig),
+      missingConfig,
     };
   }
 
@@ -2966,6 +3252,24 @@ ensureUserRegistrationColumns().catch((err) => {
   console.error("User registration schema setup failed:", err);
 });
 
+async function ensureAttendanceFaceColumns() {
+  await ensureUserRegistrationColumns();
+
+  const schemaChanges = [
+    "ALTER TABLE users ADD COLUMN attendance_face_image longtext NULL AFTER certification_file",
+    "ALTER TABLE users ADD COLUMN attendance_face_signature text NULL AFTER attendance_face_image",
+    "ALTER TABLE users ADD COLUMN attendance_face_enrolled_at datetime DEFAULT NULL AFTER attendance_face_signature",
+  ];
+
+  for (const sql of schemaChanges) {
+    await runSchemaChange(sql, "ER_DUP_FIELDNAME");
+  }
+}
+
+ensureAttendanceFaceColumns().catch((err) => {
+  console.error("Attendance face schema setup failed:", err);
+});
+
 function formatEmployeeCode(sequenceNumber) {
   const normalizedSequence = Math.max(1, Number(sequenceNumber || 1));
   return `${EMPLOYEE_CODE_PREFIX}${String(normalizedSequence).padStart(EMPLOYEE_CODE_PAD_LENGTH, "0")}`;
@@ -2997,6 +3301,7 @@ async function getNextEmployeeCode() {
 
 async function ensureUserProfileSetupColumns() {
   await ensureUserRegistrationColumns();
+  await ensureAttendanceFaceColumns();
 
   const schemaChanges = [
     "ALTER TABLE users ADD COLUMN employee_pf_amount decimal(10,2) DEFAULT NULL AFTER employee_pf_number",
@@ -5253,7 +5558,20 @@ function buildAttendanceMonthlySummary({
 app.get("/test-users", async (req, res) => {
   try {
     const [rows] = await dbPromise.query("SELECT * FROM users");
-    res.json(rows);
+    res.json(
+      rows.map((row) => {
+        const {
+          attendance_face_image: _attendanceFaceImage,
+          attendance_face_signature: _attendanceFaceSignature,
+          ...safeRow
+        } = row;
+
+        return {
+          ...safeRow,
+          attendance_face_enrolled: Boolean(row.attendance_face_enrolled_at),
+        };
+      }),
+    );
   } catch (err) {
     console.error("Test users error:", err);
     res.status(500).json({ success: false, message: "Database error" });
@@ -5445,8 +5763,12 @@ app.post("/register", (req, res) => {
     try {
       await ensureUserShiftColumns();
       await ensureUserRegistrationColumns();
+      await ensureAttendanceFaceColumns();
       await ensureUserProfileSetupColumns();
       await ensurePayrollUserColumns();
+      const attendanceFace = readAttendanceFaceSubmission(req.body, {
+        required: false,
+      });
       employeeCode = await getNextEmployeeCode();
       const [insertResult] = await dbPromise.query(sql, [
         employeeCode,
@@ -5496,6 +5818,9 @@ app.post("/register", (req, res) => {
           createdBy,
           "Registration payroll auto-sync",
         );
+        if (attendanceFace) {
+          await saveAttendanceFaceEnrollment(createdUserId, attendanceFace);
+        }
         profileSetup = await issueProfileSetupInvite(
           req,
           createdUserId,
@@ -5513,9 +5838,11 @@ app.post("/register", (req, res) => {
       });
     } catch (err) {
       console.error("Registration DB Error:", err);
-      res.status(500).json({
+      res.status(err.statusCode || 500).json({
         success: false,
-        message: getDatabaseErrorMessage(err, "Database error while creating user"),
+        message: err.statusCode
+          ? err.message
+          : getDatabaseErrorMessage(err, "Database error while creating user"),
       });
     }
   });
@@ -5561,6 +5888,7 @@ async function getProfileSetupUserByToken(token) {
           u.resume_file,
           u.experience_file,
           u.certification_file,
+          u.attendance_face_enrolled_at,
           u.skills,
           u.profile_setup_status,
           pst.expires_at AS profile_setup_expires_at,
@@ -5613,6 +5941,7 @@ async function getProfileSetupUserByToken(token) {
         resume_file,
         experience_file,
         certification_file,
+        attendance_face_enrolled_at,
         skills,
         profile_setup_status,
         profile_setup_expires_at,
@@ -5724,6 +6053,7 @@ app.get("/api/profile-setup/:token", async (req, res) => {
   try {
     await ensureUserProfileSetupColumns();
     await ensureUserRegistrationColumns();
+    await ensureAttendanceFaceColumns();
     const user = await getProfileSetupUserByToken(token);
 
     if (!user) {
@@ -5752,6 +6082,7 @@ app.get("/api/profile-setup/:token", async (req, res) => {
       success: true,
       data: {
         ...user,
+        attendance_face_enrolled: Boolean(user.attendance_face_enrolled_at),
         profile_setup_status: statusDetails.status,
         profile_setup_link_expired: statusDetails.isExpired,
       },
@@ -5816,6 +6147,7 @@ app.post("/api/profile-setup/:token", (req, res) => {
     try {
       await ensureUserProfileSetupColumns();
       await ensureUserRegistrationColumns();
+      await ensureAttendanceFaceColumns();
       const user = await getProfileSetupUserByToken(token);
 
       if (!user) {
@@ -5892,6 +6224,10 @@ app.post("/api/profile-setup/:token", (req, res) => {
         });
       }
 
+      const attendanceFace = readAttendanceFaceSubmission(req.body, {
+        required: !user.attendance_face_enrolled_at,
+      });
+
       await dbPromise.query(
         `
           UPDATE users
@@ -5956,6 +6292,10 @@ app.post("/api/profile-setup/:token", (req, res) => {
         console.error("Profile setup token used marker failed:", tokenErr);
       });
 
+      if (attendanceFace) {
+        await saveAttendanceFaceEnrollment(user.id, attendanceFace);
+      }
+
       const submittedProfile = {
         ...user,
         prof_img: profImg,
@@ -6002,9 +6342,9 @@ app.post("/api/profile-setup/:token", (req, res) => {
       });
     } catch (err) {
       console.error("Profile Setup Submit Error:", err);
-      res.status(500).json({
+      res.status(err.statusCode || 500).json({
         success: false,
-        message: "Failed to submit profile details",
+        message: err.statusCode ? err.message : "Failed to submit profile details",
       });
     }
   });
@@ -6472,6 +6812,7 @@ app.get("/api/admin/users/:id", async (req, res) => {
     await ensureUserShiftColumns();
     await ensureUserRegistrationColumns();
     await ensureUserProfileSetupColumns();
+    await ensureAttendanceFaceColumns();
     await ensurePayrollUserColumns();
 
     const [users] = await dbPromise.query(
@@ -6518,6 +6859,7 @@ app.get("/api/admin/users/:id", async (req, res) => {
           resume_file,
           experience_file,
           certification_file,
+          attendance_face_enrolled_at,
           profile_setup_status,
           DATE_FORMAT(profile_setup_expires_at, '%Y-%m-%d %H:%i:%s') AS profile_setup_expires_at,
           DATE_FORMAT(profile_setup_sent_at, '%Y-%m-%d %H:%i:%s') AS profile_setup_sent_at,
@@ -6541,6 +6883,7 @@ app.get("/api/admin/users/:id", async (req, res) => {
       success: true,
       data: {
         ...users[0],
+        attendance_face_enrolled: Boolean(users[0].attendance_face_enrolled_at),
         profile_setup_status: statusDetails.status,
         profile_setup_link_expired: statusDetails.isExpired,
       },
@@ -6768,6 +7111,7 @@ app.put("/api/admin/users/:id", (req, res) => {
       await ensureUserShiftColumns();
       await ensureUserRegistrationColumns();
       await ensureUserProfileSetupColumns();
+      await ensureAttendanceFaceColumns();
       await ensurePayrollUserColumns();
 
       const [users] = await dbPromise.query(
@@ -6792,6 +7136,7 @@ app.put("/api/admin/users/:id", (req, res) => {
             resume_file,
             experience_file,
             certification_file,
+            attendance_face_enrolled_at,
             role,
             comp_name,
             account_no,
@@ -6989,6 +7334,10 @@ app.put("/api/admin/users/:id", (req, res) => {
         });
       }
 
+      const attendanceFace = readAttendanceFaceSubmission(req.body, {
+        required: false,
+      });
+
       let sql = `
         UPDATE users
         SET
@@ -7097,15 +7446,19 @@ app.put("/api/admin/users/:id", (req, res) => {
         "User update payroll auto-sync",
       );
 
+      if (attendanceFace) {
+        await saveAttendanceFaceEnrollment(userId, attendanceFace);
+      }
+
       res.json({
         success: true,
         message: "User updated successfully",
       });
     } catch (err) {
       console.error("Admin User Update Error:", err);
-      res.status(500).json({
+      res.status(err.statusCode || 500).json({
         success: false,
-        message: "Failed to update user",
+        message: err.statusCode ? err.message : "Failed to update user",
       });
     }
   });
@@ -8789,6 +9142,7 @@ app.post("/api/attendance/check-in", async (req, res) => {
       lng,
       accuracyMeters,
     });
+    const faceVerification = await verifyAttendanceFaceForUser(userId, req.body);
     await ensureAttendanceTable();
     await ensureUserShiftColumns();
     const shiftStartSql = getAttendanceShiftStartSql("u");
@@ -8870,6 +9224,8 @@ app.post("/api/attendance/check-in", async (req, res) => {
       logout_time: shiftRows[0].logout_time,
       late_after: shiftRows[0].late_after,
       required_hours: shiftRows[0].required_hours,
+      face_verified: true,
+      face_score: faceVerification.score,
     });
   } catch (err) {
     console.error("Attendance Check-in Error:", err);
@@ -8906,6 +9262,7 @@ app.put("/api/attendance/check-out", async (req, res) => {
       lng,
       accuracyMeters,
     });
+    const faceVerification = await verifyAttendanceFaceForUser(userId, req.body);
     const checkoutResult = await finalizeAttendanceCheckout({
       userId,
       checkoutAt: new Date(),
@@ -8928,6 +9285,8 @@ app.put("/api/attendance/check-out", async (req, res) => {
       status: checkoutResult.status,
       logout_time: checkoutResult.logout_time,
       check_out: checkoutResult.check_out,
+      face_verified: true,
+      face_score: faceVerification.score,
     });
   } catch (err) {
     console.error("Attendance Check-out Error:", err);
