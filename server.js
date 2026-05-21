@@ -2026,10 +2026,28 @@ async function sendPasswordResetEmail(resetRequest, user) {
     };
   } catch (err) {
     console.error("Password reset email send failed:", err);
+    const errorText = [
+      err?.code,
+      err?.command,
+      err?.responseCode,
+      err?.response,
+      err?.message,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const authFailed =
+      errorText.includes("eauth") ||
+      errorText.includes("535") ||
+      errorText.includes("invalid login") ||
+      errorText.includes("authentication");
+
     return {
       sent: false,
       status: "failed",
-      message: "Automatic password reset email failed. Please check SMTP settings.",
+      message: authFailed
+        ? "OTP email login failed. Please check SMTP_USER and use the mailbox app password in SMTP_PASS."
+        : "OTP email could not be sent. Please check SMTP settings on the live server.",
     };
   }
 }
@@ -6478,8 +6496,10 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     }
 
     if (!emailDispatch.sent) {
-      return res.status(emailDispatch.status === "failed" ? 502 : 503).json({
+      return res.json({
         success: false,
+        emailSent: false,
+        deliveryStatus: emailDispatch.status || "failed",
         message:
           emailDispatch.message ||
           "Unable to send password reset email right now.",
