@@ -3211,6 +3211,65 @@ function setUserHelperText(id, text = "") {
     helper.classList.toggle("hidden", !text);
 }
 
+function setAdminAttendanceFaceStatus(message, type = "neutral") {
+    const status = document.getElementById("adminAttendanceFaceStatus");
+    if (!status) return;
+
+    status.textContent = message || "";
+    status.dataset.type = type;
+}
+
+function clearAdminAttendanceFaceCapture(message, type = "neutral") {
+    const form = getUserFormElement();
+    if (form?.elements?.attendance_face_image) {
+        form.elements.attendance_face_image.value = "";
+    }
+    if (form?.elements?.attendance_face_signature) {
+        form.elements.attendance_face_signature.value = "";
+    }
+
+    setAdminAttendanceFaceStatus(
+        message || "Employee can also complete this from profile setup link.",
+        type,
+    );
+}
+
+async function captureAdminAttendanceFaceEnrollment() {
+    const button = document.getElementById("adminAttendanceFaceCaptureBtn");
+    const form = getUserFormElement();
+
+    if (!window.AttendanceFace?.captureEnrollment) {
+        setAdminAttendanceFaceStatus("Camera module is not loaded.", "error");
+        return;
+    }
+
+    try {
+        if (button) button.disabled = true;
+        setAdminAttendanceFaceStatus("Opening camera...", "neutral");
+        const payload = await window.AttendanceFace.captureEnrollment({
+            title: "Private Attendance Face Setup",
+            actionLabel: "Save Face",
+        });
+
+        if (!payload?.faceImage || !payload?.faceSignature) {
+            throw new Error("Face capture failed. Please retry.");
+        }
+
+        if (form?.elements?.attendance_face_image) {
+            form.elements.attendance_face_image.value = payload.faceImage;
+        }
+        if (form?.elements?.attendance_face_signature) {
+            form.elements.attendance_face_signature.value = JSON.stringify(payload.faceSignature);
+        }
+
+        setAdminAttendanceFaceStatus("Live face photo captured privately.", "success");
+    } catch (err) {
+        setAdminAttendanceFaceStatus(err.message || "Face capture failed. Please retry.", "error");
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 function normalizeUserSkills(value) {
     const parsed = parseMaybeJson(value);
 
@@ -3370,6 +3429,7 @@ function resetUserFormState() {
     setUserHelperText("userFormResumeHint", "");
     setUserHelperText("userFormExperienceHint", "");
     setUserHelperText("userFormCertificationHint", "");
+    clearAdminAttendanceFaceCapture();
 
     document
         .querySelectorAll('#adminRegisterForm input[name="skills[]"]')
@@ -3507,6 +3567,12 @@ async function openUserEditForm(userId) {
         setUserHelperText(
             "userFormCertificationHint",
             user.certification_file ? "Existing certification file is saved. Upload a new file only to replace it." : "",
+        );
+        clearAdminAttendanceFaceCapture(
+            user.attendance_face_enrolled
+                ? "Face setup already saved. Capture again only to replace it."
+                : "No face setup saved yet. Employee can also complete it from profile setup link.",
+            user.attendance_face_enrolled ? "success" : "neutral",
         );
         toggleUserPfFields();
     } catch (err) {
@@ -4306,6 +4372,11 @@ document.addEventListener("keydown", event => {
 });
 
 const adminRegisterForm = document.getElementById("adminRegisterForm");
+const adminAttendanceFaceCaptureBtn = document.getElementById("adminAttendanceFaceCaptureBtn");
+
+if (adminAttendanceFaceCaptureBtn) {
+    adminAttendanceFaceCaptureBtn.addEventListener("click", captureAdminAttendanceFaceEnrollment);
+}
 
 if (adminRegisterForm) {
     adminRegisterForm.addEventListener("submit", async function (e) {
