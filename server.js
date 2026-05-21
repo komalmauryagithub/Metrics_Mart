@@ -1986,6 +1986,109 @@ function buildPasswordResetPayload(req, user, token, expiresAt, otpCode, otpExpi
   };
 }
 
+function getSmtpErrorText(err) {
+  return [
+    err?.code,
+    err?.command,
+    err?.responseCode,
+    err?.response,
+    err?.message,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function getPasswordResetSmtpFailureDetails(err) {
+  const errorText = getSmtpErrorText(err);
+  const code = String(
+    err?.code || err?.responseCode || err?.command || "SMTP_SEND_FAILED",
+  ).trim();
+
+  if (
+    errorText.includes("eauth") ||
+    errorText.includes("535") ||
+    errorText.includes("invalid login") ||
+    errorText.includes("authentication") ||
+    errorText.includes("username and password")
+  ) {
+    return {
+      code,
+      message:
+        "OTP email login failed. Check SMTP_USER and use the mailbox app password in SMTP_PASS.",
+    };
+  }
+
+  if (
+    errorText.includes("enotfound") ||
+    errorText.includes("dns") ||
+    errorText.includes("getaddrinfo")
+  ) {
+    return {
+      code,
+      message:
+        "SMTP host was not found. Check SMTP_HOST on the live server.",
+    };
+  }
+
+  if (
+    errorText.includes("etimedout") ||
+    errorText.includes("timeout") ||
+    errorText.includes("greeting never received")
+  ) {
+    return {
+      code,
+      message:
+        "SMTP connection timed out. Check SMTP_HOST, SMTP_PORT, and whether the live server can connect to SMTP.",
+    };
+  }
+
+  if (
+    errorText.includes("econnrefused") ||
+    errorText.includes("connection refused")
+  ) {
+    return {
+      code,
+      message:
+        "SMTP connection was refused. Check SMTP_HOST and SMTP_PORT on the live server.",
+    };
+  }
+
+  if (
+    errorText.includes("ssl") ||
+    errorText.includes("tls") ||
+    errorText.includes("wrong version number") ||
+    errorText.includes("secure")
+  ) {
+    return {
+      code,
+      message:
+        "SMTP secure/port setting is mismatched. For Gmail use SMTP_PORT=587 and SMTP_SECURE=false.",
+    };
+  }
+
+  if (
+    errorText.includes("550") ||
+    errorText.includes("553") ||
+    errorText.includes("sender") ||
+    errorText.includes("from")
+  ) {
+    return {
+      code,
+      message:
+        "SMTP sender was rejected. Keep SMTP_FROM the same email as SMTP_USER.",
+    };
+  }
+
+  return {
+    code,
+    message:
+      code && code !== "SMTP_SEND_FAILED"
+        ? `OTP email could not be sent. SMTP error: ${code}. Check live server SMTP settings.`
+        : "OTP email could not be sent. Please check SMTP settings on the live server.",
+  };
+}
+
 async function sendPasswordResetEmail(resetRequest, user) {
   const inviteEmail = String(resetRequest?.email || user?.email || "").trim();
   if (!inviteEmail) {
@@ -2026,28 +2129,13 @@ async function sendPasswordResetEmail(resetRequest, user) {
     };
   } catch (err) {
     console.error("Password reset email send failed:", err);
-    const errorText = [
-      err?.code,
-      err?.command,
-      err?.responseCode,
-      err?.response,
-      err?.message,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    const authFailed =
-      errorText.includes("eauth") ||
-      errorText.includes("535") ||
-      errorText.includes("invalid login") ||
-      errorText.includes("authentication");
+    const smtpFailure = getPasswordResetSmtpFailureDetails(err);
 
     return {
       sent: false,
       status: "failed",
-      message: authFailed
-        ? "OTP email login failed. Please check SMTP_USER and use the mailbox app password in SMTP_PASS."
-        : "OTP email could not be sent. Please check SMTP settings on the live server.",
+      message: smtpFailure.message,
+      smtpError: smtpFailure.code,
     };
   }
 }
@@ -6506,6 +6594,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         missingConfig: Array.isArray(emailDispatch.missingConfig)
           ? emailDispatch.missingConfig
           : [],
+        smtpError: emailDispatch.smtpError || null,
       });
     }
 
