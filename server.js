@@ -41,6 +41,17 @@ function loadLocalEnv() {
 loadLocalEnv();
 
 const PORT = Number(process.env.PORT || 3000);
+const LOCAL_BASE_URL = `http://localhost:${PORT}`;
+const PUBLIC_APP_URL = String(
+  process.env.PUBLIC_APP_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.CLIENT_ORIGIN ||
+    process.env.APP_URL ||
+    process.env.PUBLIC_URL ||
+    "",
+)
+  .trim()
+  .replace(/\/+$/, "");
 
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || "")
   .split(",")
@@ -52,6 +63,8 @@ const allowedOrigins = new Set([
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "https://metrics-mart.onrender.com",
+  "https://metrics-mart-gf6l.onrender.com",
+  ...(PUBLIC_APP_URL ? [PUBLIC_APP_URL] : []),
   ...configuredOrigins,
 ]);
 
@@ -216,12 +229,7 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-const PUBLIC_APP_URL = String(
-  process.env.PUBLIC_APP_URL || process.env.CLIENT_ORIGIN || "",
-)
-  .trim()
-  .replace(/\/+$/, "");
-const BASE_URL = PUBLIC_APP_URL || "http://localhost:3000";
+const BASE_URL = PUBLIC_APP_URL || LOCAL_BASE_URL;
 const LOCAL_PASSWORD_RESET_COOKIE = "mm_local_password_reset";
 const DEFAULT_EMAIL_FROM_NAME = String(
   process.env.SMTP_FROM_NAME ||
@@ -17212,5 +17220,7 @@ app.post("/api/razorpay/verify", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(
+    `Server running on port ${PORT}${PUBLIC_APP_URL ? ` (${PUBLIC_APP_URL})` : ""}`,
+  );
 });
