@@ -17344,6 +17344,27 @@ app.post("/api/razorpay/verify", (req, res) => {
   res.json({ success: true });
 });
 
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  secure: false,
+
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+
+  tls: {
+    rejectUnauthorized: false,
+  },
+
+  requireTLS: true,
+
+  connectionTimeout: 60000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000,
+});
+
 app.listen(PORT, () => {
   console.log(
     `Server running on port ${PORT}${PUBLIC_APP_URL ? ` (${PUBLIC_APP_URL})` : ""}`,
