@@ -2057,6 +2057,7 @@ async function loadMyProposals() {
               <button type="button" class="btn btn-proposal-png" onclick="downloadProposal('png', ${item.id})" title="Download PNG"><i class="fas fa-file-image"></i></button>
               <button type="button" class="btn btn-proposal-pdf" onclick="downloadProposal('pdf', ${item.id})" title="Download PDF"><i class="fas fa-file-pdf"></i></button>
               <button type="button" class="btn btn-whatsapp" onclick="shareProposalWhatsApp(${item.id})" title="Share WhatsApp"><i class="fab fa-whatsapp"></i></button>
+              <button type="button" class="btn btn-gmail" onclick="sendProposalEmail(${item.id})" title="Email PDF"><i class="fas fa-envelope"></i></button>
             </div>
           </td>
         </tr>
@@ -2239,8 +2240,8 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
   }
 }
 
-async function sendProposalEmail() {
-  if (!currentProposalId) {
+async function sendProposalEmail(proposalId = currentProposalId) {
+  if (!proposalId) {
     showPopup("No Proposal", "Please generate or open a proposal first.", false);
     return;
   }
@@ -2255,10 +2256,14 @@ async function sendProposalEmail() {
   }
 
   try {
-    await persistCurrentProposal("draft", { silent: true });
+    if (Number(proposalId) === Number(currentProposalId)) {
+      await persistCurrentProposal("draft", { silent: true });
+    }
+
+    setProposalStatusText("Preparing proposal PDF email...");
 
     const res = await fetchProposalRequest(
-      `${BASE_URL}/api/proposals/${currentProposalId}/send-email`,
+      `${BASE_URL}/api/proposals/${proposalId}/send-email`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2272,6 +2277,7 @@ async function sendProposalEmail() {
       throw new Error(data.message || "Failed to send email");
     }
 
+    setProposalStatusText(`Proposal #${proposalId} PDF emailed to ${cleanedEmail}.`);
     showPopup("Email Sent", data.message || "Proposal emailed successfully.", true);
   } catch (err) {
     console.error("Proposal Email Error:", err);
