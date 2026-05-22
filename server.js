@@ -1410,9 +1410,9 @@ function getProfileInviteMailerConfig() {
       host,
       port,
       secure,
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 8000,
       ...(user
         ? {
             auth: {
@@ -1452,6 +1452,131 @@ function getProfileInviteMailerTransport() {
     ...config,
     transport: cachedProfileInviteTransport,
   };
+}
+
+function withProfileMailerTimeouts(options = {}) {
+  return {
+    ...options,
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 8000,
+  };
+}
+
+function getProfileMailerOptionKey(options = {}) {
+  return JSON.stringify([
+    String(options.host || "").toLowerCase(),
+    Number(options.port || 0),
+    Boolean(options.secure),
+  ]);
+}
+
+function addProfileMailerCandidate(candidates, options = {}) {
+  const host = String(options.host || "").trim();
+  const port = Number(options.port || 0);
+  if (!host || !port) return;
+
+  const candidate = withProfileMailerTimeouts({
+    ...options,
+    host,
+    port,
+    secure: Boolean(options.secure),
+  });
+  const key = getProfileMailerOptionKey(candidate);
+  if (candidates.some((item) => getProfileMailerOptionKey(item) === key)) return;
+  candidates.push(candidate);
+}
+
+function getProfileMailerCandidates(mailer = {}) {
+  const baseOptions = mailer.transportOptions || {};
+  const baseHost = String(baseOptions.host || "").trim();
+  const baseAuthUser = String(baseOptions.auth?.user || "").trim();
+  const fromAddress = String(mailer.from?.address || "").trim();
+  const inferredPreset = inferProfileInviteMailerPreset(baseAuthUser || fromAddress);
+  const candidates = [];
+
+  addProfileMailerCandidate(candidates, baseOptions);
+
+  if (inferredPreset) {
+    addProfileMailerCandidate(candidates, {
+      ...baseOptions,
+      host: inferredPreset.host,
+      port: inferredPreset.port,
+      secure: inferredPreset.secure,
+    });
+  }
+
+  if (baseHost) {
+    addProfileMailerCandidate(candidates, {
+      ...baseOptions,
+      host: baseHost,
+      port: 587,
+      secure: false,
+    });
+    addProfileMailerCandidate(candidates, {
+      ...baseOptions,
+      host: baseHost,
+      port: 465,
+      secure: true,
+    });
+    addProfileMailerCandidate(candidates, {
+      ...baseOptions,
+      host: baseHost,
+      port: 2525,
+      secure: false,
+    });
+  }
+
+  return candidates;
+}
+
+function isProfileMailerRetryableError(err) {
+  const errorText = getSmtpErrorText(err);
+  return (
+    errorText.includes("timeout") ||
+    errorText.includes("etimedout") ||
+    errorText.includes("greeting never received") ||
+    errorText.includes("econnrefused") ||
+    errorText.includes("connection refused") ||
+    errorText.includes("ssl") ||
+    errorText.includes("tls") ||
+    errorText.includes("wrong version number") ||
+    errorText.includes("secure")
+  );
+}
+
+async function sendMailWithProfileMailer(mailer, mailOptions) {
+  if (!mailer?.configured || !mailer?.transport) {
+    const error = new Error(mailer?.reason || "SMTP email service is not configured.");
+    error.code = "SMTP_NOT_CONFIGURED";
+    throw error;
+  }
+
+  const candidates = getProfileMailerCandidates(mailer);
+  let lastError = null;
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const transport = index === 0
+      ? mailer.transport
+      : nodemailer.createTransport(candidate);
+
+    try {
+      return await transport.sendMail(mailOptions);
+    } catch (err) {
+      lastError = err;
+      if (!isProfileMailerRetryableError(err)) {
+        throw err;
+      }
+
+      console.warn(
+        `SMTP send retry ${index + 1}/${candidates.length} failed for ${candidate.host}:${candidate.port} secure=${Boolean(candidate.secure)}:`,
+        err?.code || err?.message || err,
+      );
+    }
+  }
+
+  throw lastError || new Error("SMTP email could not be sent.");
 }
 
 function escapeProfileSetupEmailHtml(value) {
@@ -1927,7 +2052,7 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
 
   if (mailer.configured && mailer.transport) {
     try {
-      await mailer.transport.sendMail({
+      await sendMailWithProfileMailer(mailer, {
         from: mailer.from,
         to: inviteEmail,
         subject: profileSetup.subject,
@@ -2244,7 +2369,7 @@ async function sendProfileSetupCompletionEmail(req, profile) {
   }
 
   try {
-    await mailer.transport.sendMail({
+    await sendMailWithProfileMailer(mailer, {
       from: mailer.from,
       to: recipients,
       subject: `Employee profile submitted: ${formatProfileSetupEmailValue(profile?.name, "Employee")}`,
@@ -2941,7 +3066,7 @@ async function sendPasswordResetEmail(resetRequest, user) {
   }
 
   try {
-    await mailer.transport.sendMail({
+    await sendMailWithProfileMailer(mailer, {
       from: mailer.from,
       to: inviteEmail,
       subject: resetRequest.subject,
@@ -16593,7 +16718,7 @@ app.post("/api/invoices/send-email", async (req, res) => {
       </div>
     `;
 
-    await mailer.transport.sendMail({
+    await sendMailWithProfileMailer(mailer, {
       from: mailer.from,
       to: toEmail,
       subject,
@@ -17098,7 +17223,7 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
       });
     }
 
-    await mailer.transport.sendMail({
+    await sendMailWithProfileMailer(mailer, {
       from: mailer.from,
       to: toEmail,
       subject,
