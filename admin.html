@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
+    <link rel="stylesheet" href="crm-security.css?v=20260522-1" />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
@@ -75,6 +76,9 @@
           </li>
           <li onclick="showSection('salary')">
             <i class="fas fa-wallet"></i> Salary Management
+          </li>
+          <li onclick="showSection('proposalTemplates')">
+            <i class="fas fa-file-lines"></i> Proposal Templates
           </li>
         </ul>
       </aside>
@@ -1132,6 +1136,60 @@
           <div data-payroll-scope="admin"></div>
         </div>
 
+        <div id="proposalTemplates" class="section">
+          <div class="proposal-template-shell">
+            <div class="proposal-template-header">
+              <div>
+                <h2>Proposal Templates</h2>
+                <p>Add reusable content for Marriage CRM, Hospital CRM, School Management, Inventory Software, and more.</p>
+              </div>
+              <button type="button" class="icon-action-btn" onclick="loadProposalTemplates()" title="Refresh templates">
+                <i class="fas fa-rotate-right"></i>
+              </button>
+            </div>
+
+            <form id="proposalTemplateForm" class="proposal-template-form">
+              <input type="hidden" id="proposalTemplateId">
+              <div class="proposal-template-grid">
+                <input type="text" id="proposalTemplateName" placeholder="Template Name *" required>
+                <input type="text" id="proposalTemplateCategory" placeholder="Category" value="CRM">
+                <select id="proposalTemplateStatus">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+                <textarea id="proposalTemplateContent" rows="12" placeholder="Template content with placeholders like {{client_name}}, {{company_name}}, {{project_topic}}, {{requirement_details}}, {{budget}}, {{timeline}}, {{technology}}, {{notes}}" required></textarea>
+              </div>
+              <div class="proposal-template-actions">
+                <button type="submit" class="primary-action-btn">
+                  <i class="fas fa-floppy-disk"></i> Save Template
+                </button>
+                <button type="button" class="tab-btn" onclick="resetProposalTemplateForm()">Reset</button>
+              </div>
+            </form>
+
+            <div class="proposal-template-list">
+              <div class="table-responsive">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Template Name</th>
+                      <th>Category</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="proposalTemplatesTableBody">
+                    <tr>
+                      <td colspan="5">Loading templates...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="employeeDetails" class="section" style="display: none">
           <button
             onclick="backToTeam()"
@@ -1873,5 +1931,7 @@
     <script src="attendance-face.js?v=20260521-1"></script>
     <script src="admin.js"></script>
     <script src="leave-management.js"></script>
+    <script src="crm-security.js?v=20260522-1"></script>
   </body>
+
 </html>
