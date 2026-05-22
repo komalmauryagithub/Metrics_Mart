@@ -230,6 +230,22 @@ const DEFAULT_EMAIL_FROM_NAME = String(
     process.env.MAILER_FROM_NAME ||
     "Metrics Mart Admin",
 ).trim();
+
+function resolveExistingFilePath(paths) {
+  const candidates = paths.map((filePath) => String(filePath || "").trim()).filter(Boolean);
+  return candidates.find((filePath) => fs.existsSync(filePath)) || candidates[0] || "";
+}
+
+const PROPOSAL_LETTERHEAD_HEADER_PATH = resolveExistingFilePath([
+  process.env.PROPOSAL_LETTERHEAD_HEADER,
+  path.join(__dirname, "letterhead-header.jpeg"),
+  path.join(__dirname, "assets", "proposal", "letterhead-header.jpeg"),
+]);
+const PROPOSAL_LETTERHEAD_FOOTER_PATH = resolveExistingFilePath([
+  process.env.PROPOSAL_LETTERHEAD_FOOTER,
+  path.join(__dirname, "letterhead-footer.jpeg"),
+  path.join(__dirname, "assets", "proposal", "letterhead-footer.jpeg"),
+]);
 const EMPLOYEE_CODE_PREFIX = "EMP";
 const EMPLOYEE_CODE_PAD_LENGTH = 4;
 
@@ -1428,6 +1444,247 @@ function escapeProfileSetupEmailHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normalizeProposalText(value) {
+  return String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function buildDefaultProposalContent({
+  client_name,
+  company_name,
+  project_topic,
+  requirement_details,
+  budget,
+  timeline,
+  technology,
+  notes,
+}) {
+  const projectTopic = String(project_topic || "Custom Software").trim();
+  const clientName = String(client_name || "Client").trim();
+  const companyName = String(company_name || clientName).trim();
+  const selectedTechnology = String(technology || "Core PHP + MySQL").trim();
+  const finalTimeline = String(timeline || "30 to 45 working days").trim();
+  const budgetText = String(budget || "As per final discussion").trim();
+  const requirementText = String(
+    requirement_details || "As discussed with the client.",
+  ).trim();
+  const notesText = String(notes || "").trim();
+
+  return normalizeProposalText(`
+PROJECT PROPOSAL
+
+Client Name: ${clientName}
+Company Name: ${companyName}
+Project Topic: ${projectTopic}
+
+PROJECT OVERVIEW:
+We propose to develop a customized ${projectTopic} system for ${companyName}. The solution will be planned around the client's daily workflow, reporting needs, user access levels, and future scalability.
+
+CLIENT REQUIREMENT:
+${requirementText}
+
+MAIN MODULES:
+1. Admin Panel
+2. User Management
+3. Client / Customer Management
+4. Lead / Enquiry Management
+5. Payment Management
+6. Reports and Dashboard
+7. Document Management
+8. Settings and Access Control
+
+ADMIN PANEL:
+Admin will manage users, modules, clients, reports, payments, settings, and complete business visibility from one dashboard.
+
+USER PANEL:
+Team members will access only their assigned work, update records, view reminders, and maintain client communication history.
+
+TECHNOLOGY STACK:
+${selectedTechnology}
+
+TIMELINE:
+${finalTimeline}
+
+PRICING:
+${budgetText}
+
+TERMS & CONDITIONS:
+1. Final pricing and timeline will depend on confirmed requirements.
+2. Any extra module or third-party integration will be estimated separately.
+3. Project work will start after requirement confirmation and advance payment.
+4. Content, branding assets, and required credentials will be provided by the client.
+${notesText ? `\nNOTES:\n${notesText}` : ""}
+`);
+}
+
+function applyProposalPlaceholders(content, data = {}) {
+  let output = String(content || "");
+  const replacements = {
+    client_name: data.client_name,
+    company_name: data.company_name,
+    project_topic: data.project_topic,
+    requirement_details: data.requirement_details,
+    budget: data.budget,
+    timeline: data.timeline,
+    technology: data.technology,
+    notes: data.notes,
+  };
+
+  Object.entries(replacements).forEach(([key, value]) => {
+    output = output.split(`{{${key}}}`).join(String(value || ""));
+  });
+
+  return normalizeProposalText(output);
+}
+
+function renderProposalHtml(content) {
+  return normalizeProposalText(content)
+    .split(/\n{2,}/)
+    .map((paragraph) => {
+      const safeText = escapeProfileSetupEmailHtml(paragraph).replace(/\n/g, "<br>");
+      return `<p>${safeText}</p>`;
+    })
+    .join("\n");
+}
+
+function drawProposalLetterhead(doc) {
+  const pageWidth = doc.page.width;
+  const pageHeight = doc.page.height;
+  const headerHeight = 156;
+  const footerHeight = 156;
+  const drawMissingStrip = (label, y, height, { showLabel = true } = {}) => {
+    doc
+      .save()
+      .rect(0, y, pageWidth, height)
+      .fill("#f8fafc")
+      .restore();
+
+    if (!showLabel) return;
+
+    doc
+      .save()
+      .fillColor("#0f766e")
+      .fontSize(10)
+      .text(label, 52, y + 18, {
+        width: pageWidth - 104,
+        align: "center",
+        lineBreak: false,
+      })
+      .restore();
+  };
+
+  try {
+    if (fs.existsSync(PROPOSAL_LETTERHEAD_HEADER_PATH)) {
+      const headerBuffer = fs.readFileSync(PROPOSAL_LETTERHEAD_HEADER_PATH);
+      doc.image(headerBuffer, 0, 0, {
+        width: pageWidth,
+        height: headerHeight,
+      });
+    } else {
+      console.error("Proposal header image missing:", PROPOSAL_LETTERHEAD_HEADER_PATH);
+      drawMissingStrip("Metrics Mart Proposal Header", 0, headerHeight);
+    }
+  } catch (err) {
+    console.error(
+      "Proposal header image failed:",
+      err.message,
+      PROPOSAL_LETTERHEAD_HEADER_PATH,
+    );
+    drawMissingStrip("Metrics Mart Proposal Header", 0, headerHeight);
+  }
+
+  try {
+    if (fs.existsSync(PROPOSAL_LETTERHEAD_FOOTER_PATH)) {
+      const footerBuffer = fs.readFileSync(PROPOSAL_LETTERHEAD_FOOTER_PATH);
+      doc.image(footerBuffer, 0, pageHeight - footerHeight, {
+        width: pageWidth,
+        height: footerHeight,
+      });
+    } else {
+      console.error("Proposal footer image missing:", PROPOSAL_LETTERHEAD_FOOTER_PATH);
+      drawMissingStrip(
+        "info@metricsmart.in | www.metricsmartinfoline.com",
+        pageHeight - footerHeight,
+        footerHeight,
+        { showLabel: false },
+      );
+    }
+  } catch (err) {
+    console.error(
+      "Proposal footer image failed:",
+      err.message,
+      PROPOSAL_LETTERHEAD_FOOTER_PATH,
+    );
+    drawMissingStrip(
+      "info@metricsmart.in | www.metricsmartinfoline.com",
+      pageHeight - footerHeight,
+      footerHeight,
+      { showLabel: false },
+    );
+  }
+}
+
+function getProposalLetterheadDataUri(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeType = ext === ".png" ? "image/png" : "image/jpeg";
+    return `data:${mimeType};base64,${fs.readFileSync(filePath).toString("base64")}`;
+  } catch (err) {
+    console.error("Proposal letterhead data URI failed:", err.message, filePath);
+    return "";
+  }
+}
+
+function getProposalPdfContentWidth(doc) {
+  return doc.page.width - doc.page.margins.left - doc.page.margins.right;
+}
+
+function getProposalPdfContentBottom(doc) {
+  return doc.page.height - doc.page.margins.bottom;
+}
+
+function ensureProposalPdfSpace(doc, requiredHeight = 0) {
+  const bottomY = getProposalPdfContentBottom(doc);
+  if (doc.y + requiredHeight <= bottomY) return;
+
+  doc.addPage();
+}
+
+function moveProposalPdfDown(doc, amount = 0.5) {
+  const lineHeight = doc.currentLineHeight(true) * amount;
+  ensureProposalPdfSpace(doc, lineHeight);
+  doc.moveDown(amount);
+}
+
+function writeProposalPdfText(doc, text, style = {}) {
+  const {
+    fontSize = 10,
+    color = "#111827",
+    align = "left",
+    lineGap = 3,
+    gapAfter = 0,
+    continued = false,
+  } = style;
+  const contentWidth = getProposalPdfContentWidth(doc);
+
+  doc.fontSize(fontSize).fillColor(color);
+  const textOptions = {
+    width: contentWidth,
+    align,
+    lineGap,
+    continued,
+  };
+  const estimatedHeight = doc.heightOfString(text, textOptions) + gapAfter;
+  ensureProposalPdfSpace(doc, estimatedHeight);
+  doc.fontSize(fontSize).fillColor(color);
+  doc.text(text, doc.page.margins.left, doc.y, textOptions);
+
+  if (gapAfter > 0) {
+    ensureProposalPdfSpace(doc, gapAfter);
+    doc.y += gapAfter;
+  }
 }
 
 function getProfileSetupFormSections() {
@@ -3672,25 +3929,136 @@ async function fetchProjectTrackerData(scope, userId = null) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function getAlterTableName(sql = "") {
+  const match = String(sql).match(/ALTER\s+TABLE\s+`?([a-zA-Z0-9_]+)`?/i);
+  return match ? match[1] : "";
+}
+
+function getAddColumnName(sql = "") {
+  const match = String(sql).match(/ADD\s+COLUMN\s+`?([a-zA-Z0-9_]+)`?/i);
+  return match ? match[1] : "";
+}
+
+async function schemaColumnExists(tableName, columnName, connection = dbPromise) {
+  if (!tableName || !columnName) return false;
+
+  const [rows] = await connection.query(
+    `
+      SELECT 1
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1
+    `,
+    [tableName, columnName],
+  );
+
+  return rows.length > 0;
+}
+
+async function getSchemaColumnInfo(tableName, columnName, connection = dbPromise) {
+  if (!tableName || !columnName) return null;
+
+  const [rows] = await connection.query(
+    `
+      SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1
+    `,
+    [tableName, columnName],
+  );
+
+  return rows[0] || null;
+}
+
 async function runSchemaChange(sql, duplicateCode) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const tableName = getAlterTableName(sql);
+  const addColumnName = getAddColumnName(sql);
+  const schemaLockKey = tableName
+    ? `metrics_mart_schema_${tableName}`
+    : `metrics_mart_schema_${crypto
+        .createHash("sha1")
+        .update(String(sql))
+        .digest("hex")
+        .slice(0, 24)}`;
+  const maxAttempts = 8;
+  let lastError = null;
+
+  if (addColumnName) {
     try {
-      await dbPromise.query(sql);
+      if (await schemaColumnExists(tableName, addColumnName)) return;
+    } catch (err) {
+      console.error("Schema column pre-check failed:", err.message);
+    }
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let connection = null;
+    let hasSchemaLock = false;
+    let shouldRetry = false;
+    let retryDelay = 0;
+
+    try {
+      connection = await dbPromise.getConnection();
+
+      const [lockRows] = await connection.query(
+        "SELECT GET_LOCK(?, 20) AS lock_status",
+        [schemaLockKey],
+      );
+      hasSchemaLock = Number(lockRows?.[0]?.lock_status || 0) === 1;
+      if (!hasSchemaLock) {
+        const lockError = new Error("Timed out waiting for schema migration lock");
+        lockError.code = "ER_LOCK_WAIT_TIMEOUT";
+        throw lockError;
+      }
+
+      if (addColumnName && (await schemaColumnExists(tableName, addColumnName, connection))) {
+        return;
+      }
+
+      await connection.query(sql);
       return;
     } catch (err) {
+      lastError = err;
       if (err.code === duplicateCode) return;
 
       if (
-        attempt < 3 &&
-        (err.code === "ER_LOCK_DEADLOCK" || err.code === "ER_LOCK_WAIT_TIMEOUT")
+        attempt < maxAttempts &&
+        [
+          "ER_LOCK_DEADLOCK",
+          "ER_LOCK_WAIT_TIMEOUT",
+          "ER_LOCK_ABORTED",
+          "PROTOCOL_CONNECTION_LOST",
+        ].includes(err.code)
       ) {
-        await sleep(250 * attempt);
-        continue;
+        shouldRetry = true;
+        retryDelay = 350 * attempt + Math.floor(Math.random() * 250);
+      } else {
+        throw err;
       }
+    } finally {
+      if (connection) {
+        if (hasSchemaLock) {
+          try {
+            await connection.query("SELECT RELEASE_LOCK(?)", [schemaLockKey]);
+          } catch (releaseErr) {
+            console.error("Schema lock release failed:", releaseErr.message);
+          }
+        }
+        connection.release();
+      }
+    }
 
-      throw err;
+    if (shouldRetry) {
+      await sleep(retryDelay);
     }
   }
+
+  throw lastError || new Error("Schema change failed");
 }
 
 async function ensureUserShiftColumns() {
@@ -4051,6 +4419,113 @@ ensureDownsaleRequestsTable().catch((err) => {
   console.error("Downsale requests table setup failed:", err);
 });
 
+let proposalSchemaReady = false;
+
+async function ensureProposalTables() {
+  if (proposalSchemaReady) return;
+
+  await dbPromise.query(`
+    CREATE TABLE IF NOT EXISTS proposal_templates (
+      id int NOT NULL AUTO_INCREMENT,
+      template_name varchar(255) NOT NULL,
+      category varchar(100) DEFAULT 'CRM',
+      content longtext NOT NULL,
+      status varchar(50) NOT NULL DEFAULT 'active',
+      created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY proposal_templates_name_idx (template_name),
+      KEY proposal_templates_status_idx (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+
+  await dbPromise.query(`
+    CREATE TABLE IF NOT EXISTS proposals (
+      id int NOT NULL AUTO_INCREMENT,
+      client_name varchar(255) DEFAULT NULL,
+      company_name varchar(255) DEFAULT NULL,
+      project_topic varchar(255) DEFAULT NULL,
+      requirement_details text DEFAULT NULL,
+      budget varchar(100) DEFAULT NULL,
+      timeline varchar(100) DEFAULT NULL,
+      technology varchar(255) DEFAULT NULL,
+      notes text DEFAULT NULL,
+      proposal_content longtext NOT NULL,
+      created_by int DEFAULT NULL,
+      status varchar(50) NOT NULL DEFAULT 'draft',
+      created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY proposals_created_by_idx (created_by),
+      KEY proposals_status_idx (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+
+  const templateContent = `PROJECT PROPOSAL
+
+Client Name: {{client_name}}
+Company Name: {{company_name}}
+Project Topic: {{project_topic}}
+
+PROJECT OVERVIEW:
+We propose to develop a customized {{project_topic}} solution for {{company_name}} with a clean dashboard, role based access, client records, reminders, payment tracking, and reporting.
+
+CLIENT REQUIREMENT:
+{{requirement_details}}
+
+MAIN MODULES:
+1. Admin Panel
+2. User / Team Management
+3. Client Management
+4. Lead and Follow Up Management
+5. Booking / Service Management
+6. Payment Management
+7. Reports and Analytics
+8. Document Management
+9. Settings
+
+ADMIN PANEL:
+Admin can manage all records, users, roles, reports, payments, modules, and business settings from one secure panel.
+
+USER PANEL:
+Users can update assigned records, follow ups, reminders, client notes, and daily work status as per their access.
+
+TECHNOLOGY STACK:
+{{technology}}
+
+TIMELINE:
+{{timeline}}
+
+PRICING:
+{{budget}}
+
+TERMS & CONDITIONS:
+1. Final pricing and timeline will depend on confirmed requirements.
+2. Additional modules, APIs, payment gateways, or third-party integrations will be estimated separately.
+3. Project starts after requirement confirmation and advance payment.
+4. Client will provide content, logo, branding assets, and required credentials.
+
+NOTES:
+{{notes}}`;
+
+  await dbPromise.query(
+    `
+      INSERT INTO proposal_templates (template_name, category, content, status)
+      SELECT ?, ?, ?, 'active'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM proposal_templates WHERE template_name = ? LIMIT 1
+      )
+    `,
+    ["Default CRM Proposal", "CRM", templateContent, "Default CRM Proposal"],
+  );
+
+  proposalSchemaReady = true;
+}
+
+ensureProposalTables().catch((err) => {
+  console.error("Proposal schema setup failed:", err);
+});
+
 async function ensureProjectAssignmentWorkflowColumns() {
   const columns = [
     "ADD COLUMN stage varchar(50) DEFAULT NULL AFTER status",
@@ -4143,11 +4618,21 @@ async function ensureAttendanceTable() {
     "ADD COLUMN admin_override_status varchar(30) DEFAULT NULL AFTER status",
     "ADD COLUMN admin_override_at datetime DEFAULT NULL AFTER admin_override_status",
     "ADD COLUMN admin_override_by int DEFAULT NULL AFTER admin_override_at",
-    "MODIFY COLUMN status varchar(30) DEFAULT 'present'",
   ];
 
   for (const columnSql of columns) {
     await runSchemaChange(`ALTER TABLE attendance ${columnSql}`, "ER_DUP_FIELDNAME");
+  }
+
+  const statusColumn = await getSchemaColumnInfo("attendance", "status");
+  if (
+    statusColumn &&
+    String(statusColumn.COLUMN_TYPE || "").toLowerCase() !== "varchar(30)"
+  ) {
+    await runSchemaChange(
+      "ALTER TABLE attendance MODIFY COLUMN status varchar(30) DEFAULT 'present'",
+      "ER_DUP_FIELDNAME",
+    );
   }
 
   attendanceSchemaReady = true;
@@ -4215,12 +4700,22 @@ async function ensureAttendanceLocationRequestsTable() {
     "ADD COLUMN approved_location_url varchar(500) DEFAULT NULL AFTER approved_lng",
     "ADD COLUMN approved_address varchar(255) DEFAULT NULL AFTER approved_location_url",
     "ADD COLUMN approved_radius_meters int DEFAULT NULL AFTER approved_address",
-    "MODIFY COLUMN status varchar(30) NOT NULL DEFAULT 'pending'",
   ];
 
   for (const columnSql of columns) {
     await runSchemaChange(
       `ALTER TABLE attendance_location_requests ${columnSql}`,
+      "ER_DUP_FIELDNAME",
+    );
+  }
+
+  const statusColumn = await getSchemaColumnInfo("attendance_location_requests", "status");
+  if (
+    statusColumn &&
+    String(statusColumn.COLUMN_TYPE || "").toLowerCase() !== "varchar(30)"
+  ) {
+    await runSchemaChange(
+      "ALTER TABLE attendance_location_requests MODIFY COLUMN status varchar(30) NOT NULL DEFAULT 'pending'",
       "ER_DUP_FIELDNAME",
     );
   }
@@ -15889,6 +16384,538 @@ app.post("/api/invoices/send-email", async (req, res) => {
       success: false,
       message:
         error?.message || "Failed to send invoice email attachment",
+    });
+  }
+});
+
+async function getProposalById(proposalId) {
+  await ensureProposalTables();
+  const [rows] = await dbPromise.query(
+    `
+      SELECT p.*, u.name AS created_by_name
+      FROM proposals p
+      LEFT JOIN users u ON u.id = p.created_by
+      WHERE p.id = ?
+      LIMIT 1
+    `,
+    [proposalId],
+  );
+
+  return rows[0] || null;
+}
+
+app.get("/api/proposal-templates", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const [rows] = await dbPromise.query(
+      `
+        SELECT id, template_name, category, content, status, created_at, updated_at
+        FROM proposal_templates
+        ORDER BY created_at DESC, id DESC
+      `,
+    );
+
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("Proposal templates fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load proposal templates",
+    });
+  }
+});
+
+app.post("/api/proposal-templates", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const templateName = String(req.body?.template_name || "").trim();
+    const category = String(req.body?.category || "CRM").trim() || "CRM";
+    const content = normalizeProposalText(req.body?.content);
+    const status = String(req.body?.status || "active").trim().toLowerCase();
+
+    if (!templateName || !content) {
+      return res.status(400).json({
+        success: false,
+        message: "Template name and content are required",
+      });
+    }
+
+    const [result] = await dbPromise.query(
+      `
+        INSERT INTO proposal_templates (template_name, category, content, status)
+        VALUES (?, ?, ?, ?)
+      `,
+      [templateName, category, content, status === "inactive" ? "inactive" : "active"],
+    );
+
+    return res.json({
+      success: true,
+      id: result.insertId,
+      message: "Proposal template saved successfully",
+    });
+  } catch (error) {
+    console.error("Proposal template save error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save proposal template",
+    });
+  }
+});
+
+app.put("/api/proposal-templates/:id", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const templateName = String(req.body?.template_name || "").trim();
+    const category = String(req.body?.category || "CRM").trim() || "CRM";
+    const content = normalizeProposalText(req.body?.content);
+    const status = String(req.body?.status || "active").trim().toLowerCase();
+
+    if (!templateName || !content) {
+      return res.status(400).json({
+        success: false,
+        message: "Template name and content are required",
+      });
+    }
+
+    const [result] = await dbPromise.query(
+      `
+        UPDATE proposal_templates
+        SET template_name = ?, category = ?, content = ?, status = ?
+        WHERE id = ?
+      `,
+      [
+        templateName,
+        category,
+        content,
+        status === "inactive" ? "inactive" : "active",
+        req.params.id,
+      ],
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal template not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Proposal template updated successfully",
+    });
+  } catch (error) {
+    console.error("Proposal template update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update proposal template",
+    });
+  }
+});
+
+app.post("/api/generate-proposal", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const payload = {
+      client_name: String(req.body?.client_name || "").trim(),
+      company_name: String(req.body?.company_name || "").trim(),
+      project_topic: String(req.body?.project_topic || "").trim(),
+      requirement_details: String(req.body?.requirement_details || "").trim(),
+      budget: String(req.body?.budget || "").trim(),
+      timeline: String(req.body?.timeline || "").trim(),
+      technology: String(req.body?.technology || "Core PHP + MySQL").trim(),
+      notes: String(req.body?.notes || "").trim(),
+    };
+    const createdBy = Number(req.body?.created_by || 0) || null;
+
+    if (!payload.client_name || !payload.company_name || !payload.project_topic) {
+      return res.status(400).json({
+        success: false,
+        message: "Client name, company name, and project topic are required",
+      });
+    }
+
+    const [exactTemplates] = await dbPromise.query(
+      `
+        SELECT content
+        FROM proposal_templates
+        WHERE template_name LIKE ? AND status = 'active'
+        ORDER BY id DESC
+        LIMIT 1
+      `,
+      [`%${payload.project_topic}%`],
+    );
+
+    let templateContent = exactTemplates[0]?.content || "";
+
+    if (!templateContent) {
+      const [defaultTemplates] = await dbPromise.query(
+        `
+          SELECT content
+          FROM proposal_templates
+          WHERE status = 'active' AND (
+            template_name LIKE '%Default CRM%' OR category = 'CRM'
+          )
+          ORDER BY template_name LIKE '%Default CRM%' DESC, id DESC
+          LIMIT 1
+        `,
+      );
+      templateContent = defaultTemplates[0]?.content || "";
+    }
+
+    const proposalContent = templateContent
+      ? applyProposalPlaceholders(templateContent, payload)
+      : buildDefaultProposalContent(payload);
+
+    const [result] = await dbPromise.query(
+      `
+        INSERT INTO proposals
+          (client_name, company_name, project_topic, requirement_details, budget, timeline, technology, notes, proposal_content, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        payload.client_name,
+        payload.company_name,
+        payload.project_topic,
+        payload.requirement_details,
+        payload.budget,
+        payload.timeline,
+        payload.technology,
+        payload.notes,
+        proposalContent,
+        createdBy,
+      ],
+    );
+
+    return res.json({
+      success: true,
+      proposal_id: result.insertId,
+      proposal_content: proposalContent,
+    });
+  } catch (error) {
+    console.error("Proposal generate error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Proposal generate error",
+    });
+  }
+});
+
+app.get("/api/proposals", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const createdBy = Number(req.query?.created_by || 0);
+    const params = [];
+    let whereSql = "";
+
+    if (createdBy) {
+      whereSql = "WHERE p.created_by = ?";
+      params.push(createdBy);
+    }
+
+    const [rows] = await dbPromise.query(
+      `
+        SELECT p.id, p.client_name, p.company_name, p.project_topic, p.status, p.created_at, p.updated_at,
+               u.name AS created_by_name
+        FROM proposals p
+        LEFT JOIN users u ON u.id = p.created_by
+        ${whereSql}
+        ORDER BY p.created_at DESC, p.id DESC
+      `,
+      params,
+    );
+
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("Proposal list error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load proposals",
+    });
+  }
+});
+
+app.get("/api/proposals/:id", async (req, res) => {
+  try {
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    return res.json({ success: true, data: proposal });
+  } catch (error) {
+    console.error("Proposal fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load proposal",
+    });
+  }
+});
+
+app.put("/api/proposals/:id", async (req, res) => {
+  try {
+    await ensureProposalTables();
+    const proposalContent = normalizeProposalText(req.body?.proposal_content);
+    const status = String(req.body?.status || "draft").trim().toLowerCase();
+
+    if (!proposalContent) {
+      return res.status(400).json({
+        success: false,
+        message: "Proposal content is required",
+      });
+    }
+
+    const [result] = await dbPromise.query(
+      `
+        UPDATE proposals
+        SET proposal_content = ?, status = ?
+        WHERE id = ?
+      `,
+      [proposalContent, status || "draft", req.params.id],
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Proposal updated successfully",
+    });
+  } catch (error) {
+    console.error("Proposal update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Proposal update error",
+    });
+  }
+});
+
+app.get("/api/proposals/:id/pdf", async (req, res) => {
+  try {
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    const doc = new PDFDocument({
+      size: "A4",
+      margins: {
+        top: 178,
+        bottom: 170,
+        left: 52,
+        right: 52,
+      },
+    });
+    const fileName = `proposal_${proposal.id}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    doc.pipe(res);
+    drawProposalLetterhead(doc);
+    doc.on("pageAdded", () => {
+      drawProposalLetterhead(doc);
+      doc.y = doc.page.margins.top;
+    });
+
+    writeProposalPdfText(doc, proposal.project_topic || "Project Proposal", {
+      fontSize: 18,
+      color: "#0f172a",
+      align: "center",
+      lineGap: 4,
+      gapAfter: 10,
+    });
+    writeProposalPdfText(doc, `Client: ${proposal.client_name || "-"}`, {
+      fontSize: 10,
+      color: "#475569",
+      lineGap: 2,
+    });
+    writeProposalPdfText(doc, `Company: ${proposal.company_name || "-"}`, {
+      fontSize: 10,
+      color: "#475569",
+      lineGap: 2,
+    });
+    writeProposalPdfText(doc, `Status: ${proposal.status || "draft"}`, {
+      fontSize: 10,
+      color: "#475569",
+      lineGap: 2,
+      gapAfter: 8,
+    });
+
+    normalizeProposalText(proposal.proposal_content)
+      .split("\n")
+      .forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          moveProposalPdfDown(doc, 0.5);
+          return;
+        }
+
+        const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
+        writeProposalPdfText(doc, trimmed, {
+          fontSize: isHeading ? 12 : 10,
+          color: isHeading ? "#0f766e" : "#111827",
+          lineGap: 3,
+          gapAfter: isHeading ? 3 : 1,
+        });
+      });
+
+    doc.end();
+  } catch (error) {
+    console.error("Proposal PDF error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate proposal PDF",
+    });
+  }
+});
+
+app.get("/api/proposals/:id/word", async (req, res) => {
+  try {
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    const fileName = `proposal_${proposal.id}.doc`;
+    const headerDataUri = getProposalLetterheadDataUri(PROPOSAL_LETTERHEAD_HEADER_PATH);
+    const footerDataUri = getProposalLetterheadDataUri(PROPOSAL_LETTERHEAD_FOOTER_PATH);
+    const headerHtml = headerDataUri
+      ? `<img src="${headerDataUri}" alt="Metrics Mart header" style="display:block;width:100%;height:auto;">`
+      : "";
+    const footerHtml = footerDataUri
+      ? `<img src="${footerDataUri}" alt="Metrics Mart footer" style="display:block;width:100%;height:auto;">`
+      : "";
+    const html = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${escapeProfileSetupEmailHtml(proposal.project_topic || "Proposal")}</title>
+          <style>
+            @page { size: A4; margin: 0; }
+            body { margin: 0; font-family: Arial, sans-serif; color: #111827; line-height: 1.55; background: #ffffff; }
+            .proposal-letterhead { display: block; width: 100%; height: auto; }
+            .proposal-content { padding: 24px 52px 28px; }
+            .proposal-content h1, .proposal-content p { page-break-inside: avoid; }
+          </style>
+        </head>
+        <body style="margin:0;font-family:Arial,sans-serif;color:#111827;line-height:1.55;background:#ffffff;">
+          ${headerHtml.replace("style=\"display:block;width:100%;height:auto;\"", "class=\"proposal-letterhead\"")}
+          <main class="proposal-content" style="padding:24px 52px 28px;">
+            <h1 style="text-align:center;color:#0f172a;">${escapeProfileSetupEmailHtml(proposal.project_topic || "Project Proposal")}</h1>
+            <p><strong>Client:</strong> ${escapeProfileSetupEmailHtml(proposal.client_name || "-")}</p>
+            <p><strong>Company:</strong> ${escapeProfileSetupEmailHtml(proposal.company_name || "-")}</p>
+            ${renderProposalHtml(proposal.proposal_content)}
+          </main>
+          ${footerHtml.replace("style=\"display:block;width:100%;height:auto;\"", "class=\"proposal-letterhead\"")}
+        </body>
+      </html>
+    `;
+
+    res.setHeader("Content-Type", "application/msword; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(html);
+  } catch (error) {
+    console.error("Proposal Word error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate proposal Word file",
+    });
+  }
+});
+
+app.post("/api/proposals/:id/send-email", async (req, res) => {
+  const toEmail = String(req.body?.to_email || "").trim();
+
+  if (!toEmail) {
+    return res.status(400).json({
+      success: false,
+      message: "Recipient email is required",
+    });
+  }
+
+  try {
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    const subject = `Project Proposal - ${
+      proposal.company_name || proposal.project_topic || proposal.id
+    }`;
+    const text = normalizeProposalText(proposal.proposal_content);
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:760px;margin:0 auto;padding:24px;">
+        <h2 style="margin:0 0 16px;color:#0f172a;">Project Proposal</h2>
+        ${renderProposalHtml(proposal.proposal_content)}
+      </div>
+    `;
+
+    const apiDispatch = await sendEmailViaApi({
+      to: toEmail,
+      subject,
+      text,
+      html,
+    });
+
+    if (apiDispatch.sent) {
+      return res.json({
+        success: true,
+        message: `Proposal emailed successfully to ${toEmail}.`,
+        provider: apiDispatch.provider || "email-api",
+      });
+    }
+
+    const mailer = getProfileInviteMailerTransport();
+    if (!mailer.configured || !mailer.transport) {
+      return res.status(503).json({
+        success: false,
+        message:
+          apiDispatch.status === "failed"
+            ? apiDispatch.message
+            : mailer.reason ||
+              "Email service is not configured. Add EMAIL_API_PROVIDER, provider API key, and EMAIL_API_FROM on the live server.",
+        smtpError: apiDispatch.smtpError || null,
+        missingConfig: apiDispatch.missingConfig || mailer.missingConfig || [],
+      });
+    }
+
+    await mailer.transport.sendMail({
+      from: mailer.from,
+      to: toEmail,
+      subject,
+      text,
+      html,
+    });
+
+    return res.json({
+      success: true,
+      message: `Proposal emailed successfully to ${toEmail}.`,
+      provider: "smtp",
+    });
+  } catch (error) {
+    console.error("Proposal email send failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to send proposal email",
     });
   }
 });
