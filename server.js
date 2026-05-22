@@ -1410,9 +1410,9 @@ function getProfileInviteMailerConfig() {
       host,
       port,
       secure,
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 8000,
+       connectionTimeout: 60000,
+greetingTimeout: 30000,
+socketTimeout: 60000,
       ...(user
         ? {
             auth: {
