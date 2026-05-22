@@ -9,6 +9,7 @@ let adminLeadSubmitting = false;
 let adminPopupTimer = null;
 let userFormMode = "create";
 let editingUserId = null;
+let proposalTemplatesCache = [];
 const adminChartInstances = {};
 const ADMIN_THEME_COLORS = {
     accent: "#0f766e",
@@ -67,6 +68,25 @@ const BASE_URL =
         ? "http://localhost:3000"
         : window.location.origin || "https://metrics-mart.onrender.com";
 
+async function parseAdminApiResponse(response, routeLabel = "Admin API") {
+    const text = await response.text();
+    let data = {};
+
+    if (text) {
+        try {
+            data = JSON.parse(text);
+        } catch (_err) {
+            if (response.status === 404) {
+                throw new Error(`${routeLabel} route is missing on the server (404). Redeploy or restart the live backend with latest server.js.`);
+            }
+
+            throw new Error(`${routeLabel} returned an HTML/non-JSON response (${response.status || "unknown"}).`);
+        }
+    }
+
+    return data;
+}
+
 if (window.location.protocol === "file:") {
     window.location.replace(`${BASE_URL}/admin.html`);
 }
@@ -118,6 +138,7 @@ window.onload = function () {
     setupAdminAttendanceControls();
     setupUserRegistrationForm();
     setupAdminLeadForm();
+    setupProposalTemplateForm();
     loadAdminData();
 };
 
@@ -172,6 +193,7 @@ function loadAdminData() {
     loadProjects();
     loadProjectSummary(); // 🔥 ADD THIS
     loadAdminProjectTracker();
+    loadProposalTemplates();
 
 }
 
@@ -663,6 +685,121 @@ function formatDate(dateStr) {
     });
 }
 
+function setupProposalTemplateForm() {
+    const form = document.getElementById("proposalTemplateForm");
+    if (!form || form.dataset.bound) return;
+
+    form.addEventListener("submit", saveProposalTemplate);
+    form.dataset.bound = "true";
+}
+
+function getProposalTemplateFormPayload() {
+    return {
+        id: document.getElementById("proposalTemplateId")?.value || "",
+        template_name: document.getElementById("proposalTemplateName")?.value.trim() || "",
+        category: document.getElementById("proposalTemplateCategory")?.value.trim() || "CRM",
+        status: document.getElementById("proposalTemplateStatus")?.value || "active",
+        content: document.getElementById("proposalTemplateContent")?.value.trim() || "",
+    };
+}
+
+async function loadProposalTemplates() {
+    const tbody = document.getElementById("proposalTemplatesTableBody");
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="5">Loading templates...</td></tr>`;
+
+    try {
+        const res = await fetch(`${BASE_URL}/api/proposal-templates`, { cache: "no-store" });
+        const data = await parseAdminApiResponse(res, "Proposal templates API");
+
+        if (!res.ok || !data.success) {
+            throw new Error(data.message || "Failed to load proposal templates");
+        }
+
+        proposalTemplatesCache = Array.isArray(data.data) ? data.data : [];
+
+        if (!proposalTemplatesCache.length) {
+            tbody.innerHTML = `<tr><td colspan="5">No proposal templates found</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = proposalTemplatesCache.map((template) => `
+            <tr>
+                <td>${escapeAdminHtml(template.template_name || "-")}</td>
+                <td>${escapeAdminHtml(template.category || "-")}</td>
+                <td><span class="role-badge ${template.status === "active" ? "me" : "default"}">${escapeAdminHtml(template.status || "-")}</span></td>
+                <td>${escapeAdminHtml(formatDate(template.created_at))}</td>
+                <td>
+                    <div class="proposal-template-action-buttons">
+                        <button type="button" class="tab-btn active" onclick="editProposalTemplate(${template.id})">Edit</button>
+                    </div>
+                </td>
+            </tr>
+        `).join("");
+    } catch (err) {
+        console.error("Proposal Templates Error:", err);
+        tbody.innerHTML = `<tr><td colspan="5">Unable to load proposal templates</td></tr>`;
+    }
+}
+
+async function saveProposalTemplate(event) {
+    event.preventDefault();
+
+    const payload = getProposalTemplateFormPayload();
+    if (!payload.template_name || !payload.content) {
+        showPopup("Missing Details", "Template name and content are required.", false);
+        return;
+    }
+
+    const isEdit = Boolean(payload.id);
+    const url = isEdit
+        ? `${BASE_URL}/api/proposal-templates/${payload.id}`
+        : `${BASE_URL}/api/proposal-templates`;
+
+    try {
+        const res = await fetch(url, {
+            method: isEdit ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await parseAdminApiResponse(res, "Save proposal template API");
+
+        if (!res.ok || !data.success) {
+            throw new Error(data.message || "Failed to save template");
+        }
+
+        showPopup("Saved", data.message || "Proposal template saved successfully.", true);
+        resetProposalTemplateForm();
+        loadProposalTemplates();
+    } catch (err) {
+        console.error("Save Proposal Template Error:", err);
+        showPopup("Error", err.message || "Failed to save proposal template", false);
+    }
+}
+
+function editProposalTemplate(templateId) {
+    const template = proposalTemplatesCache.find((item) => Number(item.id) === Number(templateId));
+    if (!template) return;
+
+    document.getElementById("proposalTemplateId").value = template.id || "";
+    document.getElementById("proposalTemplateName").value = template.template_name || "";
+    document.getElementById("proposalTemplateCategory").value = template.category || "CRM";
+    document.getElementById("proposalTemplateStatus").value = template.status || "active";
+    document.getElementById("proposalTemplateContent").value = template.content || "";
+}
+
+function resetProposalTemplateForm() {
+    const form = document.getElementById("proposalTemplateForm");
+    form?.reset();
+    const id = document.getElementById("proposalTemplateId");
+    const category = document.getElementById("proposalTemplateCategory");
+    const status = document.getElementById("proposalTemplateStatus");
+    if (id) id.value = "";
+    if (category) category.value = "CRM";
+    if (status) status.value = "active";
+}
+
 function getAdminEmptyTrackerCounts() {
     return {
         total: 0,
@@ -751,6 +888,7 @@ function showSection(id) {
     if (id === 'salary') {
         window.PayrollUI?.handleSectionShown('salary');
     }
+    if (id === 'proposalTemplates') loadProposalTemplates();
 }
 
 function scrollAdminViewportToTop() {
