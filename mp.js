@@ -220,7 +220,12 @@ if (forgotPasswordForm) {
       const result = await parseApiResponse(res);
 
       if (!res.ok || !result.success) {
-        throw new Error(result.message || "Unable to reset password");
+        const smtpCode = String(result.smtpError || "").trim();
+        throw new Error(
+          smtpCode
+            ? `${result.message || "Unable to reset password"} (${smtpCode})`
+            : result.message || "Unable to reset password",
+        );
       }
 
       closeForgotPasswordModal();
@@ -254,4 +259,51 @@ if (forgotPasswordForm) {
 }
 
 
+// const loginForm = document.getElementById('loginFormElement');
 
+// if (loginForm) {
+//   loginForm.addEventListener('submit', async function(e) {
+//     e.preventDefault();
+
+//     const emailOrContact = this.emailOrContact.value;
+//     const password = this.password.value;
+
+//     try {
+//       const response = await fetch('/login', {
+//         method: 'POST',
+//         headers: { 'Content-Type': 'application/json' },
+//         body: JSON.stringify({ emailOrContact, password })
+//       });
+
+//       const result = await response.json();
+
+//       if (result.success) {
+//         const userRole = result.user.role.toLowerCase();
+
+//         localStorage.setItem('currentUser', JSON.stringify(result.user));
+
+//         let redirectPage = '';
+
+//         switch(userRole) {
+//           case 'admin': redirectPage = 'admin.html'; break;
+//           case 'tme': redirectPage = 'tme.html'; break;
+//           case 'me': redirectPage = 'me.html'; break;
+//           case 'dev': redirectPage = 'dev.html'; break;
+//           default: redirectPage = 'index.html';
+//         }
+
+//         showPopup('Welcome!', `Login successful as ${userRole.toUpperCase()}`, true);
+
+//         setTimeout(() => {
+//           window.location.href = redirectPage;
+//         }, 1500);
+
+//       } else {
+//         showPopup('Login Failed', result.message, false);
+//       }
+
+//     } catch (error) {
+//       showPopup('Error', 'Server error', false);
+//     }
+//   });
+// }
