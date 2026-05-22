@@ -1786,6 +1786,10 @@ function getProfileSetupFormSections() {
       title: "Skills",
       fields: ["Work skills"],
     },
+    {
+      title: "Attendance Face Setup",
+      fields: ["Live face capture for attendance matching"],
+    },
   ];
 }
 
@@ -1900,13 +1904,42 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     };
   }
 
+  const inviteHtml = buildProfileSetupInviteHtml(profileSetup, user);
+  const apiDispatch = await sendEmailViaApi({
+    to: inviteEmail,
+    toName: String(user?.name || "").trim(),
+    subject: profileSetup.subject,
+    text: profileSetup.body,
+    html: inviteHtml,
+  });
+
+  if (apiDispatch.sent) {
+    return {
+      sent: true,
+      status: "sent",
+      provider: apiDispatch.provider || "email-api",
+      message: `Profile form email sent successfully to ${inviteEmail}.`,
+    };
+  }
+
   const mailer = getProfileInviteMailerTransport();
   if (!mailer.configured || !mailer.transport) {
+    const missingConfig = [
+      ...(Array.isArray(apiDispatch.missingConfig) ? apiDispatch.missingConfig : []),
+      ...(Array.isArray(mailer.missingConfig) ? mailer.missingConfig : []),
+    ];
+    const hasApiFailure = apiDispatch.status === "failed";
+
     return {
       sent: false,
-      status: "skipped",
-      message: mailer.reason || "Email service is being configured on the server. The profile form link is ready for manual sharing.",
-      missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
+      status: hasApiFailure ? "failed" : "skipped",
+      provider: apiDispatch.provider || null,
+      smtpError: apiDispatch.smtpError || null,
+      message: hasApiFailure
+        ? apiDispatch.message || "Email API failed and SMTP is not configured. Please share the link manually."
+        : mailer.reason ||
+          "Email service is being configured on the server. The profile form link is ready for manual sharing.",
+      missingConfig: [...new Set(missingConfig)],
     };
   }
 
@@ -1916,20 +1949,31 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
       to: inviteEmail,
       subject: profileSetup.subject,
       text: profileSetup.body,
-      html: buildProfileSetupInviteHtml(profileSetup, user),
+      html: inviteHtml,
     });
 
     return {
       sent: true,
       status: "sent",
+      provider: "smtp",
       message: `Profile form email sent successfully to ${inviteEmail}.`,
     };
   } catch (err) {
     console.error("Profile setup email send failed:", err);
+    const smtpFailure = getPasswordResetSmtpFailureDetails(err);
+    const smtpMessage = String(smtpFailure.message || "")
+      .replace(/^OTP email/i, "Profile form email")
+      .replace(/OTP email/gi, "Profile form email");
+
     return {
       sent: false,
       status: "failed",
-      message: "Profile form email could not be sent. Please share the link manually.",
+      provider: apiDispatch.provider || "smtp",
+      smtpError: smtpFailure.code,
+      message:
+        apiDispatch.status === "failed"
+          ? `${apiDispatch.message} SMTP fallback also failed: ${smtpMessage}`
+          : smtpMessage || "Profile form email could not be sent. Please share the link manually.",
     };
   }
 }
