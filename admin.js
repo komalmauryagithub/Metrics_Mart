@@ -3602,7 +3602,9 @@ function showUserFormModal() {
 function openUserForm() {
     resetUserFormState();
     showUserFormModal();
-    populateNextEmployeeCode();
+    window.requestAnimationFrame(() => {
+        populateNextEmployeeCode();
+    });
 }
 
 async function openUserEditForm(userId) {
