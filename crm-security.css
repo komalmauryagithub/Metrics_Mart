@@ -1,0 +1,77 @@
+.crm-watermark-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0.9;
+  display: none !important;
+}
+
+.crm-watermark-grid {
+  position: absolute;
+  inset: -20%;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 64px 48px;
+  transform: rotate(-28deg);
+  transform-origin: center;
+}
+
+.crm-watermark-item {
+  color: rgba(15, 23, 42, 0.09);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  white-space: pre-line;
+  user-select: none;
+}
+
+.crm-security-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: #000000;
+  color: #ffffff;
+  font: 700 22px/1.4 Arial, sans-serif;
+  text-align: center;
+  pointer-events: all;
+}
+
+.crm-security-shield.is-visible {
+  display: flex;
+}
+
+html.crm-screen-hidden body > :not(.crm-security-shield) {
+  opacity: 0;
+  visibility: hidden;
+}
+
+html.crm-screen-hidden .crm-security-shield {
+  display: flex;
+}
+
+html.crm-blackout .crm-security-shield {
+  display: flex;
+}
+
+html.crm-blackout body > :not(.crm-security-shield) {
+  opacity: 0;
+  visibility: hidden;
+}
+
+@media print {
+  body > :not(.crm-security-shield) {
+    display: none !important;
+  }
+
+  .crm-security-shield {
+    display: flex !important;
+    position: fixed;
+    inset: 0;
+  }
+}
