@@ -472,6 +472,12 @@ const AUTO_TARGET_INCENTIVE_RATE = 0.07;
 const AUTO_TARGET_INCENTIVE_ROLES = new Set(["me", "tme"]);
 let cachedProfileInviteTransport = null;
 let cachedProfileInviteTransportSignature = "";
+let userRegistrationColumnsReady = false;
+let userRegistrationColumnsPromise = null;
+let attendanceFaceColumnsReady = false;
+let attendanceFaceColumnsPromise = null;
+let userProfileSetupColumnsReady = false;
+let userProfileSetupColumnsPromise = null;
 
 async function resolveSalesTargetRole(role, userId) {
   const normalizedRole = String(role || "")
@@ -1396,6 +1402,9 @@ function getProfileInviteMailerConfig() {
       host,
       port,
       secure,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
       ...(user
         ? {
             auth: {
@@ -1905,6 +1914,31 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
   }
 
   const inviteHtml = buildProfileSetupInviteHtml(profileSetup, user);
+  const mailer = getProfileInviteMailerTransport();
+  let smtpFailure = null;
+
+  if (mailer.configured && mailer.transport) {
+    try {
+      await mailer.transport.sendMail({
+        from: mailer.from,
+        to: inviteEmail,
+        subject: profileSetup.subject,
+        text: profileSetup.body,
+        html: inviteHtml,
+      });
+
+      return {
+        sent: true,
+        status: "sent",
+        provider: "smtp",
+        message: `Profile form email sent successfully to ${inviteEmail}.`,
+      };
+    } catch (err) {
+      console.error("Profile setup SMTP email send failed:", err);
+      smtpFailure = getPasswordResetSmtpFailureDetails(err);
+    }
+  }
+
   const apiDispatch = await sendEmailViaApi({
     to: inviteEmail,
     toName: String(user?.name || "").trim(),
@@ -1922,60 +1956,28 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     };
   }
 
-  const mailer = getProfileInviteMailerTransport();
-  if (!mailer.configured || !mailer.transport) {
-    const missingConfig = [
-      ...(Array.isArray(apiDispatch.missingConfig) ? apiDispatch.missingConfig : []),
-      ...(Array.isArray(mailer.missingConfig) ? mailer.missingConfig : []),
-    ];
-    const hasApiFailure = apiDispatch.status === "failed";
+  const smtpMessage = smtpFailure
+    ? String(smtpFailure.message || "")
+        .replace(/^OTP email/i, "Profile form email")
+        .replace(/OTP email/gi, "Profile form email")
+    : "";
+  const missingConfig = [
+    ...(Array.isArray(mailer.missingConfig) ? mailer.missingConfig : []),
+    ...(Array.isArray(apiDispatch.missingConfig) ? apiDispatch.missingConfig : []),
+  ];
 
-    return {
-      sent: false,
-      status: hasApiFailure ? "failed" : "skipped",
-      provider: apiDispatch.provider || null,
-      smtpError: apiDispatch.smtpError || null,
-      message: hasApiFailure
-        ? apiDispatch.message || "Email API failed and SMTP is not configured. Please share the link manually."
-        : mailer.reason ||
-          "Email service is being configured on the server. The profile form link is ready for manual sharing.",
-      missingConfig: [...new Set(missingConfig)],
-    };
-  }
-
-  try {
-    await mailer.transport.sendMail({
-      from: mailer.from,
-      to: inviteEmail,
-      subject: profileSetup.subject,
-      text: profileSetup.body,
-      html: inviteHtml,
-    });
-
-    return {
-      sent: true,
-      status: "sent",
-      provider: "smtp",
-      message: `Profile form email sent successfully to ${inviteEmail}.`,
-    };
-  } catch (err) {
-    console.error("Profile setup email send failed:", err);
-    const smtpFailure = getPasswordResetSmtpFailureDetails(err);
-    const smtpMessage = String(smtpFailure.message || "")
-      .replace(/^OTP email/i, "Profile form email")
-      .replace(/OTP email/gi, "Profile form email");
-
-    return {
-      sent: false,
-      status: "failed",
-      provider: apiDispatch.provider || "smtp",
-      smtpError: smtpFailure.code,
-      message:
-        apiDispatch.status === "failed"
-          ? `${apiDispatch.message} SMTP fallback also failed: ${smtpMessage}`
-          : smtpMessage || "Profile form email could not be sent. Please share the link manually.",
-    };
-  }
+  return {
+    sent: false,
+    status: smtpFailure || apiDispatch.status === "failed" ? "failed" : "skipped",
+    provider: apiDispatch.provider || (mailer.configured ? "smtp" : null),
+    smtpError: smtpFailure?.code || apiDispatch.smtpError || null,
+    message:
+      smtpMessage ||
+      apiDispatch.message ||
+      mailer.reason ||
+      "Profile form email could not be sent. Please share the link manually.",
+    missingConfig: [...new Set(missingConfig)],
+  };
 }
 
 function normalizeProfileSetupEmailValue(value) {
@@ -4258,6 +4260,10 @@ ensureUserShiftColumns().catch((err) => {
 });
 
 async function ensureUserRegistrationColumns() {
+  if (userRegistrationColumnsReady) return;
+  if (userRegistrationColumnsPromise) return userRegistrationColumnsPromise;
+
+  userRegistrationColumnsPromise = (async () => {
   const schemaChanges = [
     "ALTER TABLE users MODIFY COLUMN contact varchar(20) DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN alt_contact varchar(20) DEFAULT NULL AFTER contact",
@@ -4291,6 +4297,16 @@ async function ensureUserRegistrationColumns() {
   for (const sql of schemaChanges) {
     await runSchemaChange(sql, "ER_DUP_FIELDNAME");
   }
+    userRegistrationColumnsReady = true;
+  })();
+
+  try {
+    await userRegistrationColumnsPromise;
+  } finally {
+    if (!userRegistrationColumnsReady) {
+      userRegistrationColumnsPromise = null;
+    }
+  }
 }
 
 ensureUserRegistrationColumns().catch((err) => {
@@ -4299,15 +4315,28 @@ ensureUserRegistrationColumns().catch((err) => {
 
 async function ensureAttendanceFaceColumns() {
   await ensureUserRegistrationColumns();
+  if (attendanceFaceColumnsReady) return;
+  if (attendanceFaceColumnsPromise) return attendanceFaceColumnsPromise;
 
-  const schemaChanges = [
-    "ALTER TABLE users ADD COLUMN attendance_face_image longtext NULL AFTER certification_file",
-    "ALTER TABLE users ADD COLUMN attendance_face_signature text NULL AFTER attendance_face_image",
-    "ALTER TABLE users ADD COLUMN attendance_face_enrolled_at datetime DEFAULT NULL AFTER attendance_face_signature",
-  ];
+  attendanceFaceColumnsPromise = (async () => {
+    const schemaChanges = [
+      "ALTER TABLE users ADD COLUMN attendance_face_image longtext NULL AFTER certification_file",
+      "ALTER TABLE users ADD COLUMN attendance_face_signature text NULL AFTER attendance_face_image",
+      "ALTER TABLE users ADD COLUMN attendance_face_enrolled_at datetime DEFAULT NULL AFTER attendance_face_signature",
+    ];
 
-  for (const sql of schemaChanges) {
-    await runSchemaChange(sql, "ER_DUP_FIELDNAME");
+    for (const sql of schemaChanges) {
+      await runSchemaChange(sql, "ER_DUP_FIELDNAME");
+    }
+    attendanceFaceColumnsReady = true;
+  })();
+
+  try {
+    await attendanceFaceColumnsPromise;
+  } finally {
+    if (!attendanceFaceColumnsReady) {
+      attendanceFaceColumnsPromise = null;
+    }
   }
 }
 
@@ -4331,35 +4360,47 @@ async function getNextEmployeeCode() {
 
   const [rows] = await dbPromise.query(
     `
-      SELECT employee_code
+      SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, ?) AS UNSIGNED)), 0) AS last_sequence
       FROM users
       WHERE employee_code REGEXP ?
-      ORDER BY CAST(SUBSTRING(employee_code, ?) AS UNSIGNED) DESC
-      LIMIT 1
     `,
-    [`^${EMPLOYEE_CODE_PREFIX}[0-9]+$`, EMPLOYEE_CODE_PREFIX.length + 1],
+    [EMPLOYEE_CODE_PREFIX.length + 1, `^${EMPLOYEE_CODE_PREFIX}[0-9]+$`],
   );
 
-  const lastSequence = parseEmployeeCodeSequence(rows[0]?.employee_code);
+  const lastSequence = Number(rows[0]?.last_sequence || 0);
   return formatEmployeeCode(lastSequence + 1);
 }
 
 async function ensureUserProfileSetupColumns() {
-  await ensureUserRegistrationColumns();
-  await ensureAttendanceFaceColumns();
+  if (userProfileSetupColumnsReady) return;
+  if (userProfileSetupColumnsPromise) return userProfileSetupColumnsPromise;
 
-  const schemaChanges = [
-    "ALTER TABLE users ADD COLUMN employee_pf_amount decimal(10,2) DEFAULT NULL AFTER employee_pf_number",
-    "ALTER TABLE users ADD COLUMN employer_pf_amount decimal(10,2) DEFAULT NULL AFTER employer_pf_number",
-    "ALTER TABLE users ADD COLUMN profile_setup_status varchar(20) NOT NULL DEFAULT 'not_sent' AFTER certification_file",
-    "ALTER TABLE users ADD COLUMN profile_setup_token_hash varchar(128) DEFAULT NULL AFTER profile_setup_status",
-    "ALTER TABLE users ADD COLUMN profile_setup_expires_at datetime DEFAULT NULL AFTER profile_setup_token_hash",
-    "ALTER TABLE users ADD COLUMN profile_setup_sent_at datetime DEFAULT NULL AFTER profile_setup_expires_at",
-    "ALTER TABLE users ADD COLUMN profile_setup_completed_at datetime DEFAULT NULL AFTER profile_setup_sent_at",
-  ];
+  userProfileSetupColumnsPromise = (async () => {
+    await ensureUserRegistrationColumns();
+    await ensureAttendanceFaceColumns();
 
-  for (const sql of schemaChanges) {
-    await runSchemaChange(sql, "ER_DUP_FIELDNAME");
+    const schemaChanges = [
+      "ALTER TABLE users ADD COLUMN employee_pf_amount decimal(10,2) DEFAULT NULL AFTER employee_pf_number",
+      "ALTER TABLE users ADD COLUMN employer_pf_amount decimal(10,2) DEFAULT NULL AFTER employer_pf_number",
+      "ALTER TABLE users ADD COLUMN profile_setup_status varchar(20) NOT NULL DEFAULT 'not_sent' AFTER certification_file",
+      "ALTER TABLE users ADD COLUMN profile_setup_token_hash varchar(128) DEFAULT NULL AFTER profile_setup_status",
+      "ALTER TABLE users ADD COLUMN profile_setup_expires_at datetime DEFAULT NULL AFTER profile_setup_token_hash",
+      "ALTER TABLE users ADD COLUMN profile_setup_sent_at datetime DEFAULT NULL AFTER profile_setup_expires_at",
+      "ALTER TABLE users ADD COLUMN profile_setup_completed_at datetime DEFAULT NULL AFTER profile_setup_sent_at",
+    ];
+
+    for (const sql of schemaChanges) {
+      await runSchemaChange(sql, "ER_DUP_FIELDNAME");
+    }
+    userProfileSetupColumnsReady = true;
+  })();
+
+  try {
+    await userProfileSetupColumnsPromise;
+  } finally {
+    if (!userProfileSetupColumnsReady) {
+      userProfileSetupColumnsPromise = null;
+    }
   }
 }
 
