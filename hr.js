@@ -2894,12 +2894,14 @@ function openHrUserForm() {
   if (!modal) return;
 
   resetHrUserForm();
-  populateHrNextEmployeeCode();
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
 
   const firstInput = modal.querySelector('input[name="name"]');
   firstInput?.focus();
+  window.requestAnimationFrame(() => {
+    populateHrNextEmployeeCode();
+  });
 }
 
 function closeHrUserForm() {
