@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
+    <link rel="stylesheet" href="crm-security.css?v=20260522-1" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -59,6 +60,9 @@
                 </li>
                 <li onclick="showSection('deals', this)">
                     <i class="fas fa-handshake"></i> Deals
+                </li>
+                <li onclick="showSection('createProposal', this)">
+                    <i class="fas fa-file-signature"></i> Create Proposal
                 </li>
                 <li onclick="showSection('projects', this)">
                     <i class="fas fa-tasks"></i> Projects
@@ -293,6 +297,77 @@
                 <input type="text" id="dealsSearch" placeholder="Search deals..." class="live-search"
                     onkeyup="filterTable('dealsContainer', 'dealsSearch')">
                 <div id="dealsContainer"></div>
+            </div>
+
+            <div id="createProposal" class="section">
+                <div class="proposal-shell">
+                    <div class="proposal-header">
+                        <div>
+                            <h2>Create Proposal</h2>
+                            <p>Generate an editable client proposal from saved templates.</p>
+                        </div>
+                        <button type="button" class="refresh-dashboard-btn" onclick="loadMyProposals()" title="Refresh proposals">
+                            <i class="fas fa-rotate-right"></i>
+                        </button>
+                    </div>
+
+                    <form id="proposalForm" class="proposal-form">
+                        <div class="proposal-form-grid">
+                            <input type="text" id="proposalClientName" placeholder="Client Name *" required>
+                            <input type="text" id="proposalCompanyName" placeholder="Company Name *" required>
+                            <input type="text" id="proposalProjectTopic" placeholder="Project Topic *" required>
+                            <input type="text" id="proposalBudget" placeholder="Budget (Optional)">
+                            <input type="text" id="proposalTimeline" placeholder="Timeline (Optional)">
+                            <input type="text" id="proposalTechnology" placeholder="Technology" value="Core PHP + MySQL">
+                            <textarea id="proposalRequirementDetails" placeholder="Requirement Details" rows="4"></textarea>
+                            <textarea id="proposalNotes" placeholder="Notes" rows="4"></textarea>
+                        </div>
+                        <div class="proposal-actions">
+                            <button type="submit" class="btn btn-save" id="generateProposalBtn">
+                                <i class="fas fa-wand-magic-sparkles"></i> Generate Proposal
+                            </button>
+                            <button type="button" class="btn btn-not" onclick="resetProposalForm()">Reset</button>
+                        </div>
+                    </form>
+
+                    <div class="proposal-editor-panel">
+                        <div class="proposal-editor-toolbar">
+                            <div>
+                                <h3>Editable Proposal</h3>
+                                <span id="proposalEditorStatus">Generate a proposal to start editing.</span>
+                            </div>
+                            <div class="proposal-toolbar-actions">
+                                <button type="button" class="btn btn-save" onclick="saveProposal('draft')">
+                                    <i class="fas fa-floppy-disk"></i> Save
+                                </button>
+                                <button type="button" class="btn btn-deal" onclick="saveProposal('final')">
+                                    <i class="fas fa-check"></i> Final
+                                </button>
+                                <button type="button" class="btn btn-proposal-pdf" onclick="downloadProposal('pdf')" title="Download PDF" aria-label="Download proposal PDF">
+                                    <i class="fas fa-file-pdf"></i>
+                                </button>
+                                <button type="button" class="btn btn-proposal-png" onclick="downloadProposal('png')" title="Download PNG" aria-label="Download proposal PNG">
+                                    <i class="fas fa-file-image"></i>
+                                </button>
+                                <button type="button" class="btn btn-whatsapp" onclick="shareProposalWhatsApp()" title="Share on WhatsApp" aria-label="Share proposal on WhatsApp">
+                                    <i class="fab fa-whatsapp"></i>
+                                </button>
+                                <button type="button" class="btn btn-gmail" onclick="sendProposalEmail()" title="Send email" aria-label="Send proposal email">
+                                    <i class="fas fa-envelope"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="proposalEditor" class="proposal-editor" contenteditable="true"></div>
+                    </div>
+
+                    <div class="proposal-list-panel">
+                        <div class="panel-heading">
+                            <h3>Saved Proposals</h3>
+                            <span id="proposalListCount">0 proposals</span>
+                        </div>
+                        <div id="proposalListContainer"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="projects" class="section">
@@ -652,9 +727,10 @@
     <script src="project-tracker.js"></script>
     <script src="payroll-management.js"></script>
     <script src="attendance-face.js?v=20260521-1"></script>
-    <script src="me.js"></script>
+    <script src="me.js?v=20260522-proposal-whatsapp-pdf"></script>
     <script src="attendance-auto-checkout.js"></script>
     <script src="leave-management.js"></script>
+    <script src="crm-security.js?v=20260522-1"></script>
 </body>
 
 </html>
