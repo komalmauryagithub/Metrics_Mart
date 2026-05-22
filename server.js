@@ -1687,6 +1687,83 @@ function writeProposalPdfText(doc, text, style = {}) {
   }
 }
 
+function createProposalPdfDocument() {
+  return new PDFDocument({
+    size: "A4",
+    margins: {
+      top: 178,
+      bottom: 170,
+      left: 52,
+      right: 52,
+    },
+  });
+}
+
+function writeProposalPdfDocument(doc, proposal) {
+  drawProposalLetterhead(doc);
+  doc.y = doc.page.margins.top;
+  doc.on("pageAdded", () => {
+    drawProposalLetterhead(doc);
+    doc.y = doc.page.margins.top;
+  });
+
+  writeProposalPdfText(doc, proposal.project_topic || "Project Proposal", {
+    fontSize: 18,
+    color: "#0f172a",
+    align: "center",
+    lineGap: 4,
+    gapAfter: 10,
+  });
+  writeProposalPdfText(doc, `Client: ${proposal.client_name || "-"}`, {
+    fontSize: 10,
+    color: "#475569",
+    lineGap: 2,
+  });
+  writeProposalPdfText(doc, `Company: ${proposal.company_name || "-"}`, {
+    fontSize: 10,
+    color: "#475569",
+    lineGap: 2,
+  });
+  writeProposalPdfText(doc, `Status: ${proposal.status || "draft"}`, {
+    fontSize: 10,
+    color: "#475569",
+    lineGap: 2,
+    gapAfter: 8,
+  });
+
+  normalizeProposalText(proposal.proposal_content)
+    .split("\n")
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        moveProposalPdfDown(doc, 0.5);
+        return;
+      }
+
+      const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
+      writeProposalPdfText(doc, trimmed, {
+        fontSize: isHeading ? 12 : 10,
+        color: isHeading ? "#0f766e" : "#111827",
+        lineGap: 3,
+        gapAfter: isHeading ? 3 : 1,
+      });
+    });
+}
+
+function buildProposalPdfBuffer(proposal) {
+  return new Promise((resolve, reject) => {
+    const doc = createProposalPdfDocument();
+    const chunks = [];
+
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("error", reject);
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+    writeProposalPdfDocument(doc, proposal);
+    doc.end();
+  });
+}
+
 function getProfileSetupFormSections() {
   return [
     {
@@ -2460,19 +2537,29 @@ function buildEmailApiPayload(config, message) {
   const text = String(message?.text || "").trim();
   const html = String(message?.html || "").trim();
   const from = splitEmailAddressAndName(config.fromEmail, config.fromName);
+  const attachments = normalizeEmailApiAttachments(message?.attachments);
 
   if (config.provider === "resend") {
-    return {
+    const payload = {
       from: buildFriendlyFromAddress(config.fromEmail, config.fromName),
       to: [toEmail],
       subject,
       text,
       html,
     };
+
+    if (attachments.length) {
+      payload.attachments = attachments.map((attachment) => ({
+        filename: attachment.filename,
+        content: attachment.contentBase64,
+      }));
+    }
+
+    return payload;
   }
 
   if (config.provider === "brevo") {
-    return {
+    const payload = {
       sender: {
         name: from.name || config.fromName,
         email: from.email,
@@ -2487,9 +2574,18 @@ function buildEmailApiPayload(config, message) {
       htmlContent: html,
       textContent: text,
     };
+
+    if (attachments.length) {
+      payload.attachment = attachments.map((attachment) => ({
+        name: attachment.filename,
+        content: attachment.contentBase64,
+      }));
+    }
+
+    return payload;
   }
 
-  return {
+  const payload = {
     personalizations: [
       {
         to: [
@@ -2517,6 +2613,51 @@ function buildEmailApiPayload(config, message) {
       },
     ],
   };
+
+  if (attachments.length) {
+    payload.attachments = attachments.map((attachment) => ({
+      content: attachment.contentBase64,
+      filename: attachment.filename,
+      type: attachment.contentType,
+      disposition: "attachment",
+    }));
+  }
+
+  return payload;
+}
+
+function normalizeEmailApiAttachments(value) {
+  const source = Array.isArray(value) ? value : [];
+
+  return source
+    .map((attachment) => {
+      const filename = String(attachment?.filename || attachment?.name || "").trim();
+      const contentType =
+        String(attachment?.contentType || attachment?.type || "").trim() ||
+        "application/octet-stream";
+      const content = attachment?.content ?? attachment?.buffer ?? "";
+      let contentBase64 = "";
+
+      if (Buffer.isBuffer(content)) {
+        contentBase64 = content.toString("base64");
+      } else if (content instanceof Uint8Array) {
+        contentBase64 = Buffer.from(content).toString("base64");
+      } else if (typeof content === "string") {
+        const dataUriMatch = content.match(/^data:[^;]+;base64,(.+)$/);
+        contentBase64 = dataUriMatch
+          ? dataUriMatch[1]
+          : Buffer.from(content).toString("base64");
+      }
+
+      if (!filename || !contentBase64) return null;
+
+      return {
+        filename,
+        contentType,
+        contentBase64,
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildEmailApiHeaders(config) {
@@ -2592,7 +2733,7 @@ async function sendEmailViaApi(message) {
         result.json?.messageId ||
         result.json?.message_id ||
         "",
-      message: `${getEmailApiProviderLabel(config.provider)} OTP email sent successfully.`,
+      message: `${getEmailApiProviderLabel(config.provider)} email sent successfully.`,
     };
   } catch (error) {
     console.error(`${getEmailApiProviderLabel(config.provider)} email API failed:`, error);
@@ -16706,72 +16847,15 @@ app.get("/api/proposals/:id/pdf", async (req, res) => {
       });
     }
 
-    const doc = new PDFDocument({
-      size: "A4",
-      margins: {
-        top: 178,
-        bottom: 170,
-        left: 52,
-        right: 52,
-      },
-    });
     const fileName = `proposal_${proposal.id}.pdf`;
+    const pdfBuffer = await buildProposalPdfBuffer(proposal);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
-    doc.pipe(res);
-    drawProposalLetterhead(doc);
-    doc.on("pageAdded", () => {
-      drawProposalLetterhead(doc);
-      doc.y = doc.page.margins.top;
-    });
-
-    writeProposalPdfText(doc, proposal.project_topic || "Project Proposal", {
-      fontSize: 18,
-      color: "#0f172a",
-      align: "center",
-      lineGap: 4,
-      gapAfter: 10,
-    });
-    writeProposalPdfText(doc, `Client: ${proposal.client_name || "-"}`, {
-      fontSize: 10,
-      color: "#475569",
-      lineGap: 2,
-    });
-    writeProposalPdfText(doc, `Company: ${proposal.company_name || "-"}`, {
-      fontSize: 10,
-      color: "#475569",
-      lineGap: 2,
-    });
-    writeProposalPdfText(doc, `Status: ${proposal.status || "draft"}`, {
-      fontSize: 10,
-      color: "#475569",
-      lineGap: 2,
-      gapAfter: 8,
-    });
-
-    normalizeProposalText(proposal.proposal_content)
-      .split("\n")
-      .forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          moveProposalPdfDown(doc, 0.5);
-          return;
-        }
-
-        const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
-        writeProposalPdfText(doc, trimmed, {
-          fontSize: isHeading ? 12 : 10,
-          color: isHeading ? "#0f766e" : "#111827",
-          lineGap: 3,
-          gapAfter: isHeading ? 3 : 1,
-        });
-      });
-
-    doc.end();
+    return res.send(pdfBuffer);
   } catch (error) {
     console.error("Proposal PDF error:", error);
     return res.status(500).json({
@@ -16858,28 +16942,51 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
       });
     }
 
-    const subject = `Project Proposal - ${
-      proposal.company_name || proposal.project_topic || proposal.id
-    }`;
-    const text = normalizeProposalText(proposal.proposal_content);
+    const companyLabel = String(
+      proposal.company_name || proposal.client_name || `Proposal ${proposal.id}`,
+    ).trim();
+    const subject = `Project Proposal - ${companyLabel}`;
+    const text = [
+      "Hi,",
+      "",
+      `Please find the attached project proposal PDF for ${companyLabel}.`,
+      "",
+      "Regards,",
+      "Metrics Mart",
+    ].join("\n");
     const html = `
       <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:760px;margin:0 auto;padding:24px;">
         <h2 style="margin:0 0 16px;color:#0f172a;">Project Proposal</h2>
-        ${renderProposalHtml(proposal.proposal_content)}
+        <p style="margin:0 0 12px;">Hi,</p>
+        <p style="margin:0 0 16px;">
+          Please find the attached project proposal PDF for
+          <strong>${escapeProfileSetupEmailHtml(companyLabel)}</strong>.
+        </p>
+        <p style="margin:0;">Regards,<br />Metrics Mart</p>
       </div>
     `;
+    const pdfBuffer = await buildProposalPdfBuffer(proposal);
+    const pdfFileName = `proposal_${proposal.id}.pdf`;
+    const attachments = [
+      {
+        filename: pdfFileName,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ];
 
     const apiDispatch = await sendEmailViaApi({
       to: toEmail,
       subject,
       text,
       html,
+      attachments,
     });
 
     if (apiDispatch.sent) {
       return res.json({
         success: true,
-        message: `Proposal emailed successfully to ${toEmail}.`,
+        message: `Proposal PDF emailed successfully to ${toEmail}.`,
         provider: apiDispatch.provider || "email-api",
       });
     }
@@ -16904,11 +17011,12 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
       subject,
       text,
       html,
+      attachments,
     });
 
     return res.json({
       success: true,
-      message: `Proposal emailed successfully to ${toEmail}.`,
+      message: `Proposal PDF emailed successfully to ${toEmail}.`,
       provider: "smtp",
     });
   } catch (error) {
