@@ -15,6 +15,11 @@ let approvedDownsaleRequest = null;
 let appliedUpsaleAmount = 0;
 let downsaleApiAvailable = true;
 let downsalePollingTimer = null;
+let currentProposalId = null;
+let proposalSubmitting = false;
+let currentProposalMeta = {};
+const proposalSummaryCache = new Map();
+const PROPOSAL_REQUEST_TIMEOUT_MS = 15000;
 
 const meDashboardState = {
   counts: {
@@ -32,6 +37,52 @@ const BASE_URL =
     : ["localhost", "127.0.0.1"].includes(window.location.hostname)
       ? "http://localhost:3000"
       : window.location.origin;
+const PROPOSAL_LETTERHEAD_HEADER_URL = `${BASE_URL}/letterhead-header.jpeg`;
+const PROPOSAL_LETTERHEAD_FOOTER_URL = `${BASE_URL}/letterhead-footer.jpeg`;
+
+async function fetchProposalRequest(url, options = {}, routeLabel = "Proposal API") {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), PROPOSAL_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`${routeLabel} timed out. Please restart the backend and try again.`);
+    }
+
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function parseProposalApiResponse(response, routeLabel = "Proposal API") {
+  const text = await response.text();
+  let data = {};
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_err) {
+      if (response.status === 404) {
+        throw new Error(
+          `${routeLabel} route is missing on the server (404). Redeploy or restart the live backend with the latest server.js proposal routes.`,
+        );
+      }
+
+      throw new Error(
+        `${routeLabel} returned an HTML/non-JSON response (${response.status || "unknown"}). Check if the backend is down or serving an error page.`,
+      );
+    }
+  }
+
+  return data;
+}
+
 const ATTENDANCE_GEOFENCE = {
   latitude: 19.168507,
   longitude: 72.842137,
@@ -106,6 +157,7 @@ window.onload = () => {
   loadUser();
   setupMeLeadForm();
   setupAttendanceLocationRequestModal();
+  setupProposalForm();
 
   if (currentUser?.id) {
     loadMeDashboard();
@@ -162,6 +214,7 @@ function showSection(sectionId, el) {
   if (sectionId === "appointments") fetchMEData();
   if (sectionId === "followups") fetchFollowups();
   if (sectionId === "deals") fetchDeals();
+  if (sectionId === "createProposal") loadMyProposals();
   if (sectionId === "projects") loadMeProjectTracker();
   if (sectionId === "attendance") fetchAttendance();
   if (sectionId === "salary") window.PayrollUI?.handleSectionShown("salary");
@@ -1394,6 +1447,858 @@ function filterTable(containerId, searchInputId) {
       : "none";
   });
 }
+
+function setupProposalForm() {
+  const form = document.getElementById("proposalForm");
+  if (!form) return;
+
+  form.addEventListener("submit", generateProposal);
+}
+
+function getProposalEditorText() {
+  const editor = document.getElementById("proposalEditor");
+  return String(editor?.innerText || "").trim();
+}
+
+function setProposalEditorText(text) {
+  const editor = document.getElementById("proposalEditor");
+  if (editor) editor.innerText = text || "";
+}
+
+function setProposalStatusText(text) {
+  const status = document.getElementById("proposalEditorStatus");
+  if (status) status.textContent = text;
+}
+
+function getProposalPayload() {
+  return {
+    client_name: document.getElementById("proposalClientName")?.value.trim() || "",
+    company_name: document.getElementById("proposalCompanyName")?.value.trim() || "",
+    project_topic: document.getElementById("proposalProjectTopic")?.value.trim() || "",
+    requirement_details:
+      document.getElementById("proposalRequirementDetails")?.value.trim() || "",
+    budget: document.getElementById("proposalBudget")?.value.trim() || "",
+    timeline: document.getElementById("proposalTimeline")?.value.trim() || "",
+    technology:
+      document.getElementById("proposalTechnology")?.value.trim() || "Core PHP + MySQL",
+    notes: document.getElementById("proposalNotes")?.value.trim() || "",
+    created_by: currentUser?.id || null,
+  };
+}
+
+function setProposalFormValues(proposal = {}) {
+  const fields = {
+    proposalClientName: proposal.client_name || "",
+    proposalCompanyName: proposal.company_name || "",
+    proposalProjectTopic: proposal.project_topic || "",
+    proposalRequirementDetails: proposal.requirement_details || "",
+    proposalBudget: proposal.budget || "",
+    proposalTimeline: proposal.timeline || "",
+    proposalTechnology: proposal.technology || "Core PHP + MySQL",
+    proposalNotes: proposal.notes || "",
+  };
+
+  Object.entries(fields).forEach(([id, value]) => {
+    const input = document.getElementById(id);
+    if (input) input.value = value;
+  });
+}
+
+function rememberProposalSummary(proposal = {}) {
+  const id = Number(proposal.id || proposal.proposal_id || 0);
+  if (!id) return;
+
+  const summary = {
+    id,
+    client_name: proposal.client_name || "",
+    company_name: proposal.company_name || "",
+    project_topic: proposal.project_topic || "",
+    status: proposal.status || "draft",
+  };
+
+  proposalSummaryCache.set(id, summary);
+  if (Number(currentProposalId) === id) {
+    currentProposalMeta = {
+      ...currentProposalMeta,
+      ...summary,
+    };
+  }
+}
+
+function getProposalActionMeta(proposalId = currentProposalId) {
+  const id = Number(proposalId || 0);
+  const cached = proposalSummaryCache.get(id) || {};
+
+  if (id && Number(currentProposalId) === id) {
+    return {
+      ...cached,
+      ...currentProposalMeta,
+      ...getProposalPayload(),
+      id,
+    };
+  }
+
+  return {
+    ...cached,
+    id,
+  };
+}
+
+function openProposalActionWindow(fallbackUrl = "") {
+  const popup = window.open("", "_blank");
+  if (popup) {
+    popup.document.write("<p style='font-family:Arial,sans-serif;padding:18px;'>Preparing proposal...</p>");
+    popup.document.close();
+    return popup;
+  }
+
+  if (fallbackUrl) window.location.href = fallbackUrl;
+  return null;
+}
+
+function getProposalFileBaseName(proposal = {}) {
+  const rawName = [
+    proposal.company_name,
+    proposal.project_topic,
+    proposal.id ? `proposal-${proposal.id}` : "proposal",
+  ]
+    .filter(Boolean)
+    .join("-");
+
+  return (
+    rawName
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 90) || "proposal"
+  ).toLowerCase();
+}
+
+function downloadProposalBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function getProposalSnapshot(proposalId = currentProposalId, { saveCurrent = false } = {}) {
+  const id = Number(proposalId || 0);
+  if (!id) {
+    throw new Error("Please generate or open a proposal first.");
+  }
+
+  if (Number(currentProposalId) === id) {
+    if (saveCurrent) {
+      await persistCurrentProposal("draft", { silent: true });
+    }
+
+    return {
+      ...getProposalActionMeta(id),
+      proposal_content: getProposalEditorText(),
+    };
+  }
+
+  const res = await fetchProposalRequest(
+    `${BASE_URL}/api/proposals/${id}`,
+    { cache: "no-store" },
+    "Open proposal API",
+  );
+  const data = await parseProposalApiResponse(res, "Open proposal API");
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || "Failed to open proposal");
+  }
+
+  rememberProposalSummary(data.data || {});
+  return data.data || {};
+}
+
+function splitLongCanvasWord(ctx, word, maxWidth) {
+  const pieces = [];
+  let piece = "";
+
+  String(word || "")
+    .split("")
+    .forEach((char) => {
+      const testPiece = piece + char;
+      if (piece && ctx.measureText(testPiece).width > maxWidth) {
+        pieces.push(piece);
+        piece = char;
+        return;
+      }
+
+      piece = testPiece;
+    });
+
+  if (piece) pieces.push(piece);
+  return pieces;
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [""];
+
+  const lines = [];
+  let line = "";
+
+  words.forEach((word) => {
+    const nextLine = line ? `${line} ${word}` : word;
+
+    if (ctx.measureText(nextLine).width <= maxWidth) {
+      line = nextLine;
+      return;
+    }
+
+    if (line) {
+      lines.push(line);
+      line = "";
+    }
+
+    if (ctx.measureText(word).width > maxWidth) {
+      const pieces = splitLongCanvasWord(ctx, word, maxWidth);
+      lines.push(...pieces.slice(0, -1));
+      line = pieces[pieces.length - 1] || "";
+      return;
+    }
+
+    line = word;
+  });
+
+  if (line) lines.push(line);
+  return lines;
+}
+
+function setProposalCanvasFont(ctx, style = {}) {
+  const weight = style.weight || "400";
+  const size = style.size || 26;
+  ctx.font = `${weight} ${size}px Arial, sans-serif`;
+}
+
+function buildProposalCanvasLines(ctx, proposal = {}, contentWidth) {
+  const lines = [];
+  const pushWrapped = (text, style = {}) => {
+    setProposalCanvasFont(ctx, style);
+    wrapCanvasText(ctx, text, contentWidth).forEach((line) => {
+      lines.push({ text: line, ...style });
+    });
+  };
+
+  pushWrapped(proposal.project_topic || "Project Proposal", {
+    align: "center",
+    color: "#0f172a",
+    size: 40,
+    weight: "700",
+    gapAfter: 24,
+  });
+  pushWrapped(`Client: ${proposal.client_name || "-"}`, {
+    color: "#475569",
+    size: 22,
+    weight: "700",
+  });
+  pushWrapped(`Company: ${proposal.company_name || "-"}`, {
+    color: "#475569",
+    size: 22,
+    weight: "700",
+    gapAfter: 26,
+  });
+
+  normalizeProposalEditorContent(proposal.proposal_content)
+    .split("\n")
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        lines.push({ spacer: true, height: 18 });
+        return;
+      }
+
+      const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
+      pushWrapped(trimmed, {
+        color: isHeading ? "#0f766e" : "#111827",
+        size: isHeading ? 24 : 22,
+        weight: isHeading ? "700" : "400",
+        gapAfter: isHeading ? 10 : 6,
+      });
+    });
+
+  return lines;
+}
+
+function normalizeProposalEditorContent(value) {
+  return String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function loadProposalLetterheadImage(src) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = `${src}?t=${Date.now()}`;
+  });
+}
+
+function getScaledProposalImageHeight(image, pageWidth, fallbackHeight) {
+  if (!image?.naturalWidth || !image?.naturalHeight) return fallbackHeight;
+  return Math.round(pageWidth * (image.naturalHeight / image.naturalWidth));
+}
+
+function drawProposalCanvasFallbackHeader(ctx, pageWidth, height, margin) {
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, pageWidth, height);
+  ctx.fillStyle = "#35b8ae";
+  ctx.fillRect(0, 0, pageWidth, 120);
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "700 34px Arial, sans-serif";
+  ctx.fillText("METRICS MART", margin, 72);
+  ctx.font = "400 18px Arial, sans-serif";
+  ctx.fillStyle = "#475569";
+  ctx.fillText("Project Proposal", margin, 103);
+}
+
+function drawProposalCanvasFallbackFooter(ctx, pageWidth, pageHeight, height, margin) {
+  const footerTop = pageHeight - height;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, footerTop, pageWidth, height);
+  ctx.fillStyle = "#35b8ae";
+  ctx.fillRect(0, footerTop + height - 76, pageWidth, 76);
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "400 20px Arial, sans-serif";
+  ctx.fillText("info@metricsmart.in | www.metricsmartinfoline.com", margin, footerTop + height - 38);
+}
+
+function getProposalCanvasLineHeight(line) {
+  if (line.spacer) return line.height;
+  return Math.round((line.size || 22) * 1.42) + (line.gapAfter || 0);
+}
+
+function paginateProposalCanvasLines(lines, contentTop, contentBottom) {
+  const pages = [[]];
+  let y = contentTop;
+
+  lines.forEach((line) => {
+    const lineHeight = getProposalCanvasLineHeight(line);
+    const currentPage = pages[pages.length - 1];
+
+    if (currentPage.length && y + lineHeight > contentBottom) {
+      pages.push([]);
+      y = contentTop;
+    }
+
+    if (!pages[pages.length - 1].length && line.spacer) {
+      return;
+    }
+
+    pages[pages.length - 1].push(line);
+    y += lineHeight;
+  });
+
+  return pages.filter((page) => page.length);
+}
+
+async function createProposalPngBlob(proposal = {}) {
+  const pageWidth = 1240;
+  const pageHeight = 1754;
+  const margin = 86;
+  const [headerImage, footerImage] = await Promise.all([
+    loadProposalLetterheadImage(PROPOSAL_LETTERHEAD_HEADER_URL),
+    loadProposalLetterheadImage(PROPOSAL_LETTERHEAD_FOOTER_URL),
+  ]);
+  const headerHeight = getScaledProposalImageHeight(headerImage, pageWidth, 325);
+  const footerHeight = getScaledProposalImageHeight(footerImage, pageWidth, 329);
+  const contentWidth = pageWidth - margin * 2;
+  const contentTop = headerHeight + 46;
+  const contentBottomGap = 58;
+  const contentBottom = pageHeight - footerHeight - contentBottomGap;
+  const measureCanvas = document.createElement("canvas");
+  const measureCtx = measureCanvas.getContext("2d");
+  const lines = buildProposalCanvasLines(measureCtx, proposal, contentWidth);
+  const pages = paginateProposalCanvasLines(lines, contentTop, contentBottom);
+  const pageCount = Math.max(1, pages.length);
+  const canvas = document.createElement("canvas");
+  canvas.width = pageWidth;
+  canvas.height = pageHeight * pageCount;
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  pages.forEach((pageLines, pageIndex) => {
+    const pageTop = pageIndex * pageHeight;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, pageTop, canvas.width, pageHeight);
+
+    if (headerImage) {
+      ctx.drawImage(headerImage, 0, pageTop, canvas.width, headerHeight);
+    } else {
+      ctx.save();
+      ctx.translate(0, pageTop);
+      drawProposalCanvasFallbackHeader(ctx, canvas.width, headerHeight, margin);
+      ctx.restore();
+    }
+
+    let y = pageTop + contentTop;
+    pageLines.forEach((line) => {
+      if (line.spacer) {
+        y += line.height;
+        return;
+      }
+
+      setProposalCanvasFont(ctx, line);
+      ctx.fillStyle = line.color || "#111827";
+      ctx.textBaseline = "top";
+      const x =
+        line.align === "center"
+          ? margin + (contentWidth - ctx.measureText(line.text).width) / 2
+          : margin;
+      ctx.fillText(line.text, x, y);
+      y += getProposalCanvasLineHeight(line);
+    });
+
+    if (footerImage) {
+      ctx.drawImage(footerImage, 0, pageTop + pageHeight - footerHeight, canvas.width, footerHeight);
+    } else {
+      ctx.save();
+      ctx.translate(0, pageTop);
+      drawProposalCanvasFallbackFooter(ctx, canvas.width, pageHeight, footerHeight, margin);
+      ctx.restore();
+    }
+  });
+
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+
+      reject(new Error("Failed to prepare proposal PNG."));
+    }, "image/png");
+  });
+}
+
+async function fetchProposalPdfBlob(proposalId) {
+  const res = await fetchProposalRequest(
+    `${BASE_URL}/api/proposals/${proposalId}/pdf?t=${Date.now()}`,
+    { cache: "no-store" },
+    "Proposal PDF API",
+  );
+
+  if (!res.ok) {
+    throw new Error(`Failed to prepare proposal PDF (${res.status}).`);
+  }
+
+  const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/pdf")) {
+    throw new Error("Proposal PDF API did not return a PDF file.");
+  }
+
+  return res.blob();
+}
+
+async function persistCurrentProposal(status = "draft", { silent = false } = {}) {
+  if (!currentProposalId) {
+    throw new Error("Please generate or open a proposal first.");
+  }
+
+  const proposalContent = getProposalEditorText();
+  if (!proposalContent) {
+    throw new Error("Proposal content is required.");
+  }
+
+  const res = await fetchProposalRequest(
+    `${BASE_URL}/api/proposals/${currentProposalId}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        proposal_content: proposalContent,
+        status,
+      }),
+    },
+    "Save proposal API",
+  );
+  const data = await parseProposalApiResponse(res, "Save proposal API");
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || "Failed to save proposal");
+  }
+
+  currentProposalMeta = {
+    ...currentProposalMeta,
+    ...getProposalPayload(),
+    id: Number(currentProposalId),
+    status,
+  };
+  rememberProposalSummary(currentProposalMeta);
+
+  if (!silent) {
+    setProposalStatusText(`Proposal #${currentProposalId} saved as ${status}.`);
+    showPopup("Saved", "Proposal saved successfully.", true);
+    loadMyProposals();
+  }
+
+  return data;
+}
+
+async function generateProposal(event) {
+  event?.preventDefault();
+  if (proposalSubmitting) return;
+
+  const payload = getProposalPayload();
+  if (!payload.client_name || !payload.company_name || !payload.project_topic) {
+    showPopup(
+      "Missing Details",
+      "Client name, company name, and project topic are required.",
+      false,
+    );
+    return;
+  }
+
+  const btn = document.getElementById("generateProposalBtn");
+  proposalSubmitting = true;
+  if (btn) btn.disabled = true;
+  setProposalStatusText("Generating proposal...");
+
+  try {
+    const res = await fetchProposalRequest(
+      `${BASE_URL}/api/generate-proposal`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "Generate proposal API",
+    );
+    const data = await parseProposalApiResponse(res, "Generate proposal API");
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Failed to generate proposal");
+    }
+
+    currentProposalId = data.proposal_id;
+    currentProposalMeta = {
+      ...payload,
+      id: Number(currentProposalId),
+      status: "draft",
+    };
+    rememberProposalSummary(currentProposalMeta);
+    setProposalEditorText(data.proposal_content || "");
+    setProposalStatusText(
+      `Draft proposal #${currentProposalId} generated. You can edit it now.`,
+    );
+    showPopup("Proposal Ready", "Proposal generated successfully.", true);
+    loadMyProposals();
+  } catch (err) {
+    console.error("Generate Proposal Error:", err);
+    setProposalStatusText("Proposal generation failed.");
+    showPopup("Error", err.message || "Failed to generate proposal", false);
+  } finally {
+    proposalSubmitting = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function saveProposal(status = "draft") {
+  try {
+    await persistCurrentProposal(status);
+  } catch (err) {
+    console.error("Save Proposal Error:", err);
+    showPopup("Error", err.message || "Failed to save proposal", false);
+  }
+}
+
+async function loadMyProposals() {
+  if (!currentUser?.id) return;
+
+  const container = document.getElementById("proposalListContainer");
+  if (!container) return;
+
+  container.innerHTML = `<p class="no-data">Loading proposals...</p>`;
+
+  try {
+    const res = await fetchProposalRequest(
+      `${BASE_URL}/api/proposals?created_by=${encodeURIComponent(currentUser.id)}`,
+      { cache: "no-store" },
+      "Load proposals API",
+    );
+    const data = await parseProposalApiResponse(res, "Load proposals API");
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Failed to load proposals");
+    }
+
+    const proposals = Array.isArray(data.data) ? data.data : [];
+    proposalSummaryCache.clear();
+    proposals.forEach(rememberProposalSummary);
+
+    const count = document.getElementById("proposalListCount");
+    if (count) count.textContent = `${proposals.length} proposals`;
+
+    if (!proposals.length) {
+      container.innerHTML = `<p class="no-data">No proposals created yet</p>`;
+      return;
+    }
+
+    const rows = proposals
+      .map(
+        (item) => `
+        <tr>
+          <td>${escapeAttendanceHtml(item.company_name || "-")}</td>
+          <td>${escapeAttendanceHtml(item.client_name || "-")}</td>
+          <td>${escapeAttendanceHtml(item.project_topic || "-")}</td>
+          <td><span class="status ${escapeAttendanceHtml(item.status || "draft")}">${escapeAttendanceHtml(item.status || "draft")}</span></td>
+          <td>${escapeAttendanceHtml(formatAttendanceRequestDateTime(item.created_at))}</td>
+          <td>
+            <div class="proposal-table-actions">
+              <button type="button" class="btn btn-save" onclick="openProposal(${item.id})" title="Open proposal"><i class="fas fa-pen"></i></button>
+              <button type="button" class="btn btn-proposal-png" onclick="downloadProposal('png', ${item.id})" title="Download PNG"><i class="fas fa-file-image"></i></button>
+              <button type="button" class="btn btn-proposal-pdf" onclick="downloadProposal('pdf', ${item.id})" title="Download PDF"><i class="fas fa-file-pdf"></i></button>
+              <button type="button" class="btn btn-whatsapp" onclick="shareProposalWhatsApp(${item.id})" title="Share WhatsApp"><i class="fab fa-whatsapp"></i></button>
+            </div>
+          </td>
+        </tr>
+      `,
+      )
+      .join("");
+
+    container.innerHTML = `
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Client</th>
+              <th>Topic</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    console.error("Load Proposals Error:", err);
+    container.innerHTML = `<p class="error">Unable to load proposals</p>`;
+  }
+}
+
+async function openProposal(proposalId) {
+  try {
+    const res = await fetchProposalRequest(
+      `${BASE_URL}/api/proposals/${proposalId}`,
+      {
+        cache: "no-store",
+      },
+      "Open proposal API",
+    );
+    const data = await parseProposalApiResponse(res, "Open proposal API");
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Failed to open proposal");
+    }
+
+    const proposal = data.data || {};
+    currentProposalId = proposal.id;
+    currentProposalMeta = {
+      ...proposal,
+      id: Number(proposal.id || 0),
+    };
+    rememberProposalSummary(currentProposalMeta);
+    setProposalFormValues(proposal);
+    setProposalEditorText(proposal.proposal_content || "");
+    setProposalStatusText(
+      `Editing proposal #${proposal.id} for ${proposal.company_name || "client"}.`,
+    );
+  } catch (err) {
+    console.error("Open Proposal Error:", err);
+    showPopup("Error", err.message || "Failed to open proposal", false);
+  }
+}
+
+async function downloadProposal(type, proposalId = currentProposalId) {
+  if (!proposalId) {
+    showPopup("No Proposal", "Please generate or open a proposal first.", false);
+    return;
+  }
+
+  const normalizedType = String(type || "").toLowerCase();
+  if (!["pdf", "word", "png"].includes(normalizedType)) {
+    showPopup("Error", "Invalid proposal download type.", false);
+    return;
+  }
+
+  if (normalizedType === "png") {
+    try {
+      setProposalStatusText("Preparing proposal PNG...");
+      const proposal = await getProposalSnapshot(proposalId);
+      const blob = await createProposalPngBlob(proposal);
+      downloadProposalBlob(blob, `${getProposalFileBaseName(proposal)}.png`);
+      setProposalStatusText(`Proposal #${proposalId} PNG is ready.`);
+      showPopup("Downloaded", "Proposal PNG downloaded successfully.", true);
+    } catch (err) {
+      console.error("Download Proposal PNG Error:", err);
+      showPopup("Download Error", err.message || "Failed to download proposal PNG", false);
+    }
+    return;
+  }
+
+  const downloadUrl = `${BASE_URL}/api/proposals/${proposalId}/${normalizedType}?t=${Date.now()}`;
+  const popup = openProposalActionWindow(downloadUrl);
+
+  try {
+    if (Number(proposalId) === Number(currentProposalId)) {
+      await persistCurrentProposal("draft", { silent: true });
+    }
+
+    if (popup) {
+      popup.location.href = downloadUrl;
+    } else {
+      window.location.href = downloadUrl;
+    }
+  } catch (err) {
+    if (popup) popup.close();
+    console.error("Download Proposal Error:", err);
+    showPopup("Download Error", err.message || "Failed to download proposal", false);
+  }
+}
+
+async function shareProposalWhatsApp(proposalId = currentProposalId) {
+  if (!proposalId) {
+    showPopup("No Proposal", "Please generate or open a proposal first.", false);
+    return;
+  }
+
+  const popup = openProposalActionWindow();
+
+  try {
+    if (Number(proposalId) === Number(currentProposalId)) {
+      try {
+        await persistCurrentProposal("draft", { silent: true });
+      } catch (err) {
+        console.warn("Proposal save before WhatsApp PDF share failed.", err);
+        throw err;
+      }
+    }
+
+    const proposal = await getProposalSnapshot(proposalId);
+    const topic = proposal.project_topic || "Project Proposal";
+    const company = proposal.company_name || "your company";
+    const message = `Hello, please find attached the ${topic} proposal PDF for ${company}.`;
+    setProposalStatusText("Preparing proposal PDF for WhatsApp...");
+    const pdfBlob = await fetchProposalPdfBlob(proposalId);
+    const fileName = `${getProposalFileBaseName(proposal)}.pdf`;
+    const file =
+      typeof File === "function"
+        ? new File([pdfBlob], fileName, {
+            type: "application/pdf",
+          })
+        : null;
+
+    if (
+      file &&
+      navigator.share &&
+      (!navigator.canShare || navigator.canShare({ files: [file] }))
+    ) {
+      try {
+        await navigator.share({
+          title: topic,
+          text: message,
+          files: [file],
+        });
+        if (popup) popup.close();
+        setProposalStatusText(`Proposal #${proposalId} PDF is ready for WhatsApp.`);
+        showPopup("Shared", "Proposal PDF shared successfully.", true);
+        return;
+      } catch (shareErr) {
+        if (shareErr?.name === "AbortError") return;
+        console.warn("Native proposal PDF share failed, falling back to PDF download.", shareErr);
+      }
+    }
+
+    downloadProposalBlob(pdfBlob, fileName);
+    const fallbackMessage = `${message}\n\nPDF download ho gaya hai. WhatsApp chat me attach/file icon se downloaded PDF select karke send kar do.`;
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(fallbackMessage)}`;
+
+    if (popup) {
+      popup.location.href = whatsappUrl;
+    } else {
+      window.location.href = whatsappUrl;
+    }
+    setProposalStatusText(`Proposal #${proposalId} PDF downloaded for WhatsApp.`);
+    showPopup("PDF Ready", "PDF download ho gaya. WhatsApp me downloaded PDF attach karke send karo.", true);
+  } catch (err) {
+    if (popup) popup.close();
+    if (err?.name === "AbortError") return;
+    console.error("Proposal WhatsApp Error:", err);
+    showPopup("WhatsApp Error", err.message || "Failed to share proposal", false);
+  }
+}
+
+async function sendProposalEmail() {
+  if (!currentProposalId) {
+    showPopup("No Proposal", "Please generate or open a proposal first.", false);
+    return;
+  }
+
+  const toEmail = prompt("Client email address");
+  if (!toEmail) return;
+
+  const cleanedEmail = toEmail.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+    showPopup("Invalid Email", "Please enter a valid client email address.", false);
+    return;
+  }
+
+  try {
+    await persistCurrentProposal("draft", { silent: true });
+
+    const res = await fetchProposalRequest(
+      `${BASE_URL}/api/proposals/${currentProposalId}/send-email`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_email: cleanedEmail }),
+      },
+      "Proposal email API",
+    );
+    const data = await parseProposalApiResponse(res, "Proposal email API");
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Failed to send email");
+    }
+
+    showPopup("Email Sent", data.message || "Proposal emailed successfully.", true);
+  } catch (err) {
+    console.error("Proposal Email Error:", err);
+    showPopup("Email Error", err.message || "Failed to send proposal email", false);
+  }
+}
+
+function resetProposalForm() {
+  const form = document.getElementById("proposalForm");
+  form?.reset();
+  const technology = document.getElementById("proposalTechnology");
+  if (technology) technology.value = "Core PHP + MySQL";
+  currentProposalId = null;
+  currentProposalMeta = {};
+  setProposalEditorText("");
+  setProposalStatusText("Generate a proposal to start editing.");
+}
+
+Object.assign(window, {
+  downloadProposal,
+  loadMyProposals,
+  openProposal,
+  resetProposalForm,
+  saveProposal,
+  sendProposalEmail,
+  shareProposalWhatsApp,
+});
 
 function getAttendanceCheckoutDisplay(row) {
   if (row?.check_out) return row.check_out;
