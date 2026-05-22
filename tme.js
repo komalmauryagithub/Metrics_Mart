@@ -2180,6 +2180,15 @@ function parseStoredArray(value) {
   }
 }
 
+function escapeTmeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function fetchEmployeeList(date, time) {
   const hasDateTime = Boolean(date && time);
   const endpoint = hasDateTime
@@ -2738,6 +2747,8 @@ function setLeadFormMode(mode) {
 
   if (submitBtn) {
     submitBtn.textContent = isEditMode ? "Update Client" : "Add Client";
+    submitBtn.dataset.defaultText = submitBtn.textContent;
+    submitBtn.disabled = false;
   }
 }
 
@@ -2898,6 +2909,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const addBtn = document.getElementById("addLeadBtn");
   if (addBtn) addBtn.addEventListener("click", openLeadForm);
+
+  const leadsTableBody = document.getElementById("leadsTableBody");
+  if (leadsTableBody) {
+    leadsTableBody.addEventListener("click", (event) => {
+      const editButton = event.target.closest(".js-edit-lead");
+      if (!editButton) return;
+
+      event.preventDefault();
+      const leadId = Number(editButton.dataset.leadId || 0);
+      if (leadId) {
+        void editLead(leadId);
+      }
+    });
+  }
 
   const actionType = document.getElementById("actionType");
   if (actionType) {
@@ -3069,45 +3094,49 @@ async function loadLeads() {
       const createdDate = lead.created_at
         ? new Date(lead.created_at).toLocaleDateString("en-IN")
         : "N/A";
+      const actionTypeLabel = lead.action_type
+        ? String(lead.action_type).toUpperCase()
+        : "APPOINTMENT";
+      const statusClass =
+        lead.action_type === "appointment" ? "appointment" : "followup";
 
       const row = `
         <tr>
             <td>${index + 1}</td>
-            <td><strong>${lead.company_name || "-"}</strong></td>
-            <td>${lead.client_name || "-"}</td>
-            <td>${lead.contact || "-"}</td>
-            <td>${lead.city || "-"}</td>
-            <td>${lead.source_lead || "-"}</td>
+            <td><strong>${escapeTmeHtml(lead.company_name || "-")}</strong></td>
+            <td>${escapeTmeHtml(lead.client_name || "-")}</td>
+            <td>${escapeTmeHtml(lead.contact || "-")}</td>
+            <td>${escapeTmeHtml(lead.city || "-")}</td>
+            <td>${escapeTmeHtml(lead.source_lead || "-")}</td>
 
             <td>
-                <span class="status-badge ${
-                  lead.action_type === "appointment"
-                    ? "appointment"
-                    : "followup"
-                }">
-                    ${
-                      lead.action_type
-                        ? lead.action_type.toUpperCase()
-                        : "APPOINTMENT"
-                    }
+                <span class="status-badge ${statusClass}">
+                    ${escapeTmeHtml(actionTypeLabel)}
                 </span>
             </td>
 
-            <td>${createdDate}</td>
+            <td>${escapeTmeHtml(createdDate)}</td>
 
             <td class="actions">
 
                 ${
                   lead.action_type === "followup"
                     ? `
-                <button onclick="convertToAppointment(${lead.id})" class="btn-appointment" title="Set Appointment">
+                <button type="button" onclick="convertToAppointment(${Number(lead.id)})" class="btn-appointment" title="Set Appointment">
                     <i class="fas fa-calendar-plus"></i>Set
                 </button>`
                     : ""
                 }
 
-                <button onclick="editLead(${lead.id})" class="btn-edit" title="Edit">
+                <button
+                  type="button"
+                  class="btn-edit js-edit-lead"
+                  data-lead-id="${Number(lead.id)}"
+                  title="Update lead data"
+                  aria-label="Update ${escapeTmeHtml(lead.company_name || "lead")}"
+                >
                     <i class="fas fa-edit"></i>
+                    <span>Update</span>
                 </button>
 
             </td>
@@ -3246,6 +3275,9 @@ async function handleLeadFormSubmit(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
 
+  const submitBtn = document.getElementById("leadSubmitBtn");
+  const originalSubmitText =
+    submitBtn?.dataset.defaultText || submitBtn?.textContent || "Save";
   const form = new FormData(event.currentTarget);
   const isEditMode = Boolean(editingLeadId);
   const selectedEmployee = getSelectedEmployeeMeta("lead_assign_emp");
@@ -3295,6 +3327,11 @@ async function handleLeadFormSubmit(event) {
   };
 
   try {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = isEditMode ? "Updating..." : "Saving...";
+    }
+
     const res = await fetch(
       isEditMode
         ? `${BASE_URL}/api/leads/${editingLeadId}`
@@ -3345,6 +3382,11 @@ async function handleLeadFormSubmit(event) {
     console.error(err);
     closePendingWhatsAppWindow(pendingWhatsAppWindow);
     showPopup("Server Error", "Server error", false);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalSubmitText;
+    }
   }
 }
 
