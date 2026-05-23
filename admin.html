@@ -6,7 +6,7 @@
     <title>Admin Panel</title>
     <link rel="icon" type="image/png" href="logo_.png" />
 
-    <link rel="stylesheet" href="admin.css" />
+    <link rel="stylesheet" href="admin.css?v=20260523-admin-proposals" />
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
@@ -76,9 +76,14 @@
           <li onclick="showSection('salary')">
             <i class="fas fa-wallet"></i> Salary Management
           </li>
+          <li onclick="showSection('proposals')">
+            <i class="fas fa-file-signature"></i> Proposals
+          </li>
+          <!-- Proposal Templates temporarily hidden from admin panel.
           <li onclick="showSection('proposalTemplates')">
             <i class="fas fa-file-lines"></i> Proposal Templates
           </li>
+          -->
         </ul>
       </aside>
 
@@ -1135,6 +1140,78 @@
           <div data-payroll-scope="admin"></div>
         </div>
 
+        <div id="proposals" class="section">
+          <div class="admin-proposal-shell">
+            <div class="admin-proposal-header">
+              <div>
+                <h2>Proposals</h2>
+                <p>Create, edit, download, email, and share proposal PDFs from admin.</p>
+              </div>
+              <button type="button" class="icon-action-btn" onclick="AdminProposals.load()" title="Refresh proposals">
+                <i class="fas fa-rotate-right"></i>
+              </button>
+            </div>
+
+            <form id="adminProposalForm" class="admin-proposal-form">
+              <div class="admin-proposal-form-grid">
+                <input type="text" id="adminProposalClientName" placeholder="Client Name *" required>
+                <input type="text" id="adminProposalCompanyName" placeholder="Company Name *" required>
+                <input type="text" id="adminProposalProjectTopic" placeholder="Project Topic *" required>
+                <input type="text" id="adminProposalBudget" placeholder="Budget (Optional)">
+                <input type="text" id="adminProposalTimeline" placeholder="Timeline (Optional)">
+                <input type="text" id="adminProposalTechnology" placeholder="Technology" value="Core PHP + MySQL">
+                <textarea id="adminProposalRequirementDetails" placeholder="Requirement Details" rows="4"></textarea>
+                <textarea id="adminProposalNotes" placeholder="Notes" rows="4"></textarea>
+              </div>
+              <div class="admin-proposal-actions">
+                <button type="submit" class="primary-action-btn" id="adminGenerateProposalBtn">
+                  <i class="fas fa-wand-magic-sparkles"></i> Generate Proposal
+                </button>
+                <button type="button" class="tab-btn" onclick="AdminProposals.reset()">Reset</button>
+              </div>
+            </form>
+
+            <div class="admin-proposal-editor-panel">
+              <div class="admin-proposal-editor-toolbar">
+                <div>
+                  <h3>Editable Proposal</h3>
+                  <span id="adminProposalEditorStatus">Generate a proposal to start editing.</span>
+                </div>
+                <div class="admin-proposal-toolbar-actions">
+                  <button type="button" class="tab-btn active" onclick="AdminProposals.save('draft')">
+                    <i class="fas fa-floppy-disk"></i> Save
+                  </button>
+                  <button type="button" class="tab-btn" onclick="AdminProposals.save('final')">
+                    <i class="fas fa-check"></i> Final
+                  </button>
+                  <button type="button" class="btn btn-proposal-pdf" onclick="AdminProposals.download('pdf')" title="Download PDF" aria-label="Download proposal PDF">
+                    <i class="fas fa-file-pdf"></i>
+                  </button>
+                  <button type="button" class="btn btn-proposal-png" onclick="AdminProposals.download('png')" title="Download PNG" aria-label="Download proposal PNG">
+                    <i class="fas fa-file-image"></i>
+                  </button>
+                  <button type="button" class="btn btn-whatsapp" onclick="AdminProposals.shareWhatsApp()" title="Share on WhatsApp" aria-label="Share proposal on WhatsApp">
+                    <i class="fab fa-whatsapp"></i>
+                  </button>
+                  <button type="button" class="btn btn-gmail" onclick="AdminProposals.sendEmail()" title="Send email" aria-label="Send proposal email">
+                    <i class="fas fa-envelope"></i>
+                  </button>
+                </div>
+              </div>
+              <div id="adminProposalEditor" class="admin-proposal-editor" contenteditable="true"></div>
+            </div>
+
+            <div class="admin-proposal-list-panel">
+              <div class="admin-proposal-panel-heading">
+                <h3>Saved Proposals</h3>
+                <span id="adminProposalListCount">0 proposals</span>
+              </div>
+              <div id="adminProposalListContainer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proposal Templates temporarily hidden from admin panel.
         <div id="proposalTemplates" class="section">
           <div class="proposal-template-shell">
             <div class="proposal-template-header">
@@ -1188,6 +1265,7 @@
             </div>
           </div>
         </div>
+        -->
 
         <div id="employeeDetails" class="section" style="display: none">
           <button
@@ -1523,7 +1601,14 @@
                         <option value="RedSea">RedSea</option>
                       </select>
                     </div>
-                    <div class="input-group">
+                    <div class="input-group hidden" id="userCompensationTypeGroup">
+                      <label>Payment Type *</label>
+                      <select name="compensation_type" id="userCompensationType" required>
+                        <option value="salary" selected>Salary</option>
+                        <option value="commission">Commission</option>
+                      </select>
+                    </div>
+                    <div class="input-group" id="userSalaryGroup">
                       <label>Monthly Salary *</label>
                       <input
                         type="number"
@@ -1531,6 +1616,17 @@
                         min="0"
                         step="0.01"
                         required
+                      />
+                    </div>
+                    <div class="input-group hidden" id="userCommissionGroup">
+                      <label>Commission Percent *</label>
+                      <input
+                        type="number"
+                        name="commission_percent"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        placeholder="e.g. 5"
                       />
                     </div>
                     <div class="input-group">
@@ -1893,8 +1989,9 @@
       </div>
     </div>
     <script src="project-tracker.js"></script>
-    <script src="payroll-management.js"></script>
-    <script src="admin.js"></script>
+    <script src="payroll-management.js?v=20260523-tme-payment"></script>
+    <script src="admin.js?v=20260523-admin-proposals"></script>
+    <script src="admin-proposals.js?v=20260523-admin-proposals"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260522-1"></script>
   </body>
