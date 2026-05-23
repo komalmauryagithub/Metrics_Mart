@@ -42,16 +42,17 @@ loadLocalEnv();
 
 const PORT = Number(process.env.PORT || 3000);
 const LOCAL_BASE_URL = `http://localhost:${PORT}`;
-const PUBLIC_APP_URL = String(
-  process.env.PUBLIC_APP_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    process.env.CLIENT_ORIGIN ||
-    process.env.APP_URL ||
-    process.env.PUBLIC_URL ||
-    "",
-)
-  .trim()
-  .replace(/\/+$/, "");
+const RENDER_EXTERNAL_HOSTNAME_URL = process.env.RENDER_EXTERNAL_HOSTNAME
+  ? `https://${String(process.env.RENDER_EXTERNAL_HOSTNAME).trim().replace(/^https?:\/\//, "")}`
+  : "";
+const PUBLIC_APP_URL = resolveConfiguredPublicAppUrl([
+  process.env.PUBLIC_APP_URL,
+  process.env.RENDER_EXTERNAL_URL,
+  RENDER_EXTERNAL_HOSTNAME_URL,
+  process.env.CLIENT_ORIGIN,
+  process.env.APP_URL,
+  process.env.PUBLIC_URL,
+]);
 
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || "")
   .split(",")
@@ -692,6 +693,43 @@ async function getAutoTargetIncentiveForPayroll({ user, monthKey, basicSalary })
   };
 }
 
+async function getSalesCommissionForPayroll({ user, monthKey } = {}) {
+  const compensationType = normalizeCompensationType(user?.compensation_type);
+  const role = String(user?.role || "")
+    .toLowerCase()
+    .trim();
+  const commissionPercent = normalizeCommissionPercent(user?.commission_percent);
+
+  if (
+    compensationType !== "commission" ||
+    role !== "tme" ||
+    commissionPercent <= 0
+  ) {
+    return {
+      applies: false,
+      salesAmount: 0,
+      dealsCount: 0,
+      percent: 0,
+      amount: 0,
+    };
+  }
+
+  const summary = await getSalesTargetSummaryData({
+    role,
+    userId: Number(user?.id || 0),
+    monthKey,
+  });
+  const salesAmount = normalizePayrollAmount(summary.achieved);
+
+  return {
+    applies: true,
+    salesAmount,
+    dealsCount: Number(summary.dealsCount || 0),
+    percent: commissionPercent,
+    amount: Number(((salesAmount * commissionPercent) / 100).toFixed(2)),
+  };
+}
+
 // ====================== MIDDLEWARE ======================
 app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 app.use(express.json({ limit: "8mb" }));
@@ -1054,10 +1092,46 @@ function normalizeOptionalPayrollAmount(value) {
   return Number.isFinite(numericValue) ? Number(numericValue.toFixed(2)) : null;
 }
 
+function normalizeCompensationType(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return normalized === "commission" ? "commission" : "salary";
+}
+
+function normalizeCommissionPercent(value) {
+  const percent = Number(String(value ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(percent) ? Number(percent.toFixed(2)) : 0;
+}
+
 function normalizeAppBaseUrl(value) {
   return String(value || "")
     .trim()
     .replace(/\/+$/, "");
+}
+
+function getNonLoopbackUrlOrigin(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return "";
+
+  try {
+    const parsedUrl = new URL(rawValue);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) return "";
+    if (isLoopbackHostValue(parsedUrl.hostname)) return "";
+    return normalizeAppBaseUrl(parsedUrl.origin);
+  } catch (err) {
+    return "";
+  }
+}
+
+function resolveConfiguredPublicAppUrl(candidates = []) {
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeAppBaseUrl(candidate);
+    const publicOrigin = getNonLoopbackUrlOrigin(normalizedCandidate);
+    if (publicOrigin) return publicOrigin;
+  }
+
+  return "";
 }
 
 function resolveAppBaseUrl(req) {
@@ -1079,6 +1153,13 @@ function resolveAppBaseUrl(req) {
 
   if (requestBaseUrl && !isLoopbackHostValue(requestHost)) {
     return requestBaseUrl;
+  }
+
+  const originBaseUrl =
+    getNonLoopbackUrlOrigin(req.headers.origin) ||
+    getNonLoopbackUrlOrigin(req.headers.referer);
+  if (originBaseUrl) {
+    return originBaseUrl;
   }
 
   return PUBLIC_APP_URL || requestBaseUrl || BASE_URL;
@@ -1410,7 +1491,7 @@ function getProfileInviteMailerConfig() {
       host,
       port,
       secure,
-       connectionTimeout: 60000,
+     connectionTimeout: 60000,
 greetingTimeout: 30000,
 socketTimeout: 60000,
       ...(user
@@ -4707,6 +4788,8 @@ async function ensurePayrollUserColumns() {
   const schemaChanges = [
     "ALTER TABLE users ADD COLUMN department varchar(100) DEFAULT NULL AFTER role",
     "ALTER TABLE users ADD COLUMN salary decimal(12,2) NOT NULL DEFAULT 0 AFTER department",
+    "ALTER TABLE users ADD COLUMN compensation_type varchar(20) NOT NULL DEFAULT 'salary' AFTER salary",
+    "ALTER TABLE users ADD COLUMN commission_percent decimal(6,2) NOT NULL DEFAULT 0 AFTER compensation_type",
     "ALTER TABLE users ADD COLUMN joining_date date DEFAULT NULL AFTER salary",
     "ALTER TABLE users ADD COLUMN is_team_lead tinyint(1) NOT NULL DEFAULT 0 AFTER joining_date",
   ];
@@ -7009,6 +7092,10 @@ app.post("/register", (req, res) => {
     const logoutTime = String(req.body.logout_time || "").trim() || "18:00";
     const rawSalary = String(req.body.salary ?? "").trim();
     const salary = normalizePayrollAmount(rawSalary);
+    const requestedCompensationType = normalizeCompensationType(req.body.compensation_type);
+    const compensationType = role === "tme" ? requestedCompensationType : "salary";
+    const commissionPercent = normalizeCommissionPercent(req.body.commission_percent);
+    const storedSalary = compensationType === "commission" ? 0 : salary;
     const joiningDate = normalizeDateOnlyValue(req.body.joining_date) || null;
     const totalExperience = String(req.body.total_experience || "").trim() || null;
     const pfEnabled = normalizePayrollBoolean(req.body.pf_enabled) ? 1 : 0;
@@ -7043,11 +7130,27 @@ app.post("/register", (req, res) => {
       });
     }
 
-    if (salary < 0) {
+    if (storedSalary < 0) {
       return res.status(400).json({
         success: false,
         message: "Salary cannot be negative",
       });
+    }
+
+    if (compensationType === "commission") {
+      if (role !== "tme") {
+        return res.status(400).json({
+          success: false,
+          message: "Commission payout is available only for TME role",
+        });
+      }
+
+      if (commissionPercent <= 0 || commissionPercent > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "Commission percent must be between 0 and 100",
+        });
+      }
     }
 
     if (spswd !== cpswd) {
@@ -7091,6 +7194,8 @@ app.post("/register", (req, res) => {
         logout_time,
         skills,
         salary,
+        compensation_type,
+        commission_percent,
         joining_date,
         total_experience,
         pf_enabled,
@@ -7103,7 +7208,7 @@ app.post("/register", (req, res) => {
         experience_file,
         certification_file
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
@@ -7142,7 +7247,9 @@ app.post("/register", (req, res) => {
         loginTime || null,
         logoutTime,
         skillsJSON,
-        Number((rawSalary === "" ? 0 : salary).toFixed(2)),
+        Number((rawSalary === "" ? 0 : storedSalary).toFixed(2)),
+        compensationType,
+        compensationType === "commission" ? commissionPercent : 0,
         joiningDate,
         totalExperience,
         pfEnabled,
@@ -8194,6 +8301,8 @@ app.get("/api/admin/users/:id", async (req, res) => {
           TIME_FORMAT(logout_time, '%H:%i') AS logout_time,
           skills,
           salary,
+          compensation_type,
+          commission_percent,
           is_team_lead,
           DATE_FORMAT(joining_date, '%Y-%m-%d') AS joining_date,
           total_experience,
@@ -8421,6 +8530,8 @@ app.put("/api/admin/users/:id", (req, res) => {
     const logoutTime = String(req.body.logout_time || "").trim() || "18:00";
     const rawSalary = String(req.body.salary ?? "").trim();
     const salary = normalizePayrollAmount(rawSalary);
+    const requestedCompensationType = normalizeCompensationType(req.body.compensation_type);
+    const commissionPercent = normalizeCommissionPercent(req.body.commission_percent);
     const joiningDate = normalizeDateOnlyValue(req.body.joining_date) || null;
     const totalExperience = String(req.body.total_experience || "").trim() || null;
     const pfEnabled =
@@ -8496,6 +8607,8 @@ app.put("/api/admin/users/:id", (req, res) => {
             TIME_FORMAT(logout_time, '%H:%i') AS logout_time,
             skills,
             salary,
+            compensation_type,
+            commission_percent,
             DATE_FORMAT(joining_date, '%Y-%m-%d') AS joining_date,
             total_experience,
             pf_enabled,
@@ -8606,6 +8719,18 @@ app.put("/api/admin/users/:id", (req, res) => {
         rawSalary !== ""
           ? salary
           : normalizePayrollAmount(existingUser.salary, 0);
+      let nextCompensationType = hasBodyField(req.body, "compensation_type")
+        ? requestedCompensationType
+        : normalizeCompensationType(existingUser.compensation_type);
+      if (nextRole !== "tme") {
+        nextCompensationType = "salary";
+      }
+      const nextCommissionPercent = nextCompensationType === "commission"
+        ? hasBodyField(req.body, "commission_percent")
+          ? commissionPercent
+          : normalizeCommissionPercent(existingUser.commission_percent)
+        : 0;
+      const nextStoredSalary = nextCompensationType === "commission" ? 0 : nextSalary;
       const nextJoiningDate = hasBodyField(req.body, "joining_date")
         ? joiningDate
         : existingUser.joining_date || null;
@@ -8666,11 +8791,27 @@ app.put("/api/admin/users/:id", (req, res) => {
         });
       }
 
-      if (nextSalary < 0) {
+      if (nextStoredSalary < 0) {
         return res.status(400).json({
           success: false,
           message: "Salary cannot be negative",
         });
+      }
+
+      if (nextCompensationType === "commission") {
+        if (nextRole !== "tme") {
+          return res.status(400).json({
+            success: false,
+            message: "Commission payout is available only for TME role",
+          });
+        }
+
+        if (nextCommissionPercent <= 0 || nextCommissionPercent > 100) {
+          return res.status(400).json({
+            success: false,
+            message: "Commission percent must be between 0 and 100",
+          });
+        }
       }
 
       if (
@@ -8715,6 +8856,8 @@ app.put("/api/admin/users/:id", (req, res) => {
           logout_time = ?,
           skills = ?,
           salary = ?,
+          compensation_type = ?,
+          commission_percent = ?,
           joining_date = ?,
           total_experience = ?,
           pf_enabled = ?,
@@ -8754,7 +8897,9 @@ app.put("/api/admin/users/:id", (req, res) => {
         nextLoginTime,
         nextLogoutTime,
         JSON.stringify(nextSkills),
-        Number(nextSalary.toFixed(2)),
+        Number(nextStoredSalary.toFixed(2)),
+        nextCompensationType,
+        nextCommissionPercent,
         nextJoiningDate,
         nextTotalExperience,
         nextPfEnabled,
@@ -12873,6 +13018,8 @@ async function getPayrollEmployeeProfile(userId) {
         role,
         department,
         salary,
+        compensation_type,
+        commission_percent,
         joining_date,
         is_team_lead
       FROM users
@@ -12889,6 +13036,8 @@ async function getPayrollEmployeeProfile(userId) {
     ...employee,
     department: derivePayrollDepartment(employee),
     salary: normalizePayrollAmount(employee.salary),
+    compensation_type: normalizeCompensationType(employee.compensation_type),
+    commission_percent: normalizeCommissionPercent(employee.commission_percent),
     is_team_lead: Number(employee.is_team_lead || 0),
   };
 }
@@ -12964,6 +13113,8 @@ async function getPayrollUsers(filters = {}) {
         role,
         department,
         salary,
+        compensation_type,
+        commission_percent,
         joining_date,
         is_team_lead
       FROM users
@@ -12980,6 +13131,8 @@ async function getPayrollUsers(filters = {}) {
     ...row,
     department: derivePayrollDepartment(row),
     salary: normalizePayrollAmount(row.salary),
+    compensation_type: normalizeCompensationType(row.compensation_type),
+    commission_percent: normalizeCommissionPercent(row.commission_percent),
     is_team_lead: Number(row.is_team_lead || 0),
   }));
 }
@@ -13308,8 +13461,20 @@ function inferPayrollLeavePaidStatus(leaveRow) {
 
 async function buildPayrollPreview(user, monthKey, options = {}) {
   const monthRange = getPayrollMonthRange(monthKey);
+  const role = normalizeRoleValue(user?.role);
+  const requestedCompensationType =
+    options.compensationType !== undefined
+      ? normalizeCompensationType(options.compensationType)
+      : normalizeCompensationType(user?.compensation_type);
+  const compensationType = role === "tme" ? requestedCompensationType : "salary";
+  const commissionPercent =
+    options.commissionPercent !== undefined
+      ? normalizeCommissionPercent(options.commissionPercent)
+      : normalizeCommissionPercent(user?.commission_percent);
   const configuredSalary =
-    options.salary !== undefined
+    compensationType === "commission"
+      ? 0
+      : options.salary !== undefined
       ? normalizePayrollAmount(options.salary)
       : normalizePayrollAmount(user?.salary);
   const storedPayroll = options.storedPayroll || null;
@@ -13317,6 +13482,8 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     Boolean(storedPayroll) &&
     options.preferStoredSnapshot !== false &&
     options.salary === undefined &&
+    options.compensationType === undefined &&
+    options.commissionPercent === undefined &&
     options.bonusAmount === undefined &&
     options.incentiveAmount === undefined &&
     options.penaltyAmount === undefined &&
@@ -13356,9 +13523,26 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     options.notes !== undefined
       ? String(options.notes || "").trim()
       : String(storedPayroll?.notes || "").trim();
+  const liveSalesCommission = await getSalesCommissionForPayroll({
+    user: {
+      ...user,
+      compensation_type: compensationType,
+      commission_percent: commissionPercent,
+    },
+    monthKey: monthRange.monthKey,
+  });
+  const salesCommission = shouldUseStoredSnapshot
+    ? {
+        ...liveSalesCommission,
+        applies: compensationType === "commission",
+        amount: compensationType === "commission"
+          ? normalizePayrollAmount(storedPayroll?.incentiveAmount)
+          : 0,
+      }
+    : liveSalesCommission;
   const autoTargetIncentive = shouldUseStoredSnapshot
     ? null
-    : AUTO_TARGET_INCENTIVE_ROLES.has(
+    : compensationType === "salary" && AUTO_TARGET_INCENTIVE_ROLES.has(
         String(user?.role || "")
           .toLowerCase()
           .trim(),
@@ -13371,7 +13555,9 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
       : null;
   const incentiveAmount = shouldUseStoredSnapshot
     ? normalizePayrollAmount(storedPayroll?.incentiveAmount)
-    : autoTargetIncentive
+    : salesCommission.applies
+      ? salesCommission.amount
+      : autoTargetIncentive
       ? autoTargetIncentive.amount
       : options.incentiveAmount !== undefined
         ? normalizePayrollAmount(options.incentiveAmount)
@@ -13386,6 +13572,11 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
       role: normalizeRoleValue(user.role),
       roleLabel: getPayrollRoleLabel(user.role),
       department,
+      compensationType,
+      commissionPercent,
+      commissionSalesAmount: salesCommission.salesAmount,
+      commissionDealsCount: salesCommission.dealsCount,
+      commissionAmount: salesCommission.amount,
       salary: configuredSalary,
       joiningDate,
       isTeamLead,
@@ -13497,6 +13688,11 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     role: normalizeRoleValue(user.role),
     roleLabel: getPayrollRoleLabel(user.role),
     department,
+    compensationType,
+    commissionPercent,
+    commissionSalesAmount: salesCommission.salesAmount,
+    commissionDealsCount: salesCommission.dealsCount,
+    commissionAmount: salesCommission.amount,
     salary: basicSalary,
     joiningDate,
     isTeamLead,
@@ -13631,7 +13827,9 @@ async function replacePayrollLineItems(payrollId, preview) {
   }
 
   if (preview.incentiveAmount > 0) {
-    const incentiveLabel = AUTO_TARGET_INCENTIVE_ROLES.has(
+    const incentiveLabel = preview.compensationType === "commission"
+      ? `Sales commission (${Number(preview.commissionPercent || 0)}%)`
+      : AUTO_TARGET_INCENTIVE_ROLES.has(
       String(preview.role || "")
         .toLowerCase()
         .trim(),
@@ -13680,10 +13878,36 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
     updates.salary !== undefined
       ? normalizePayrollAmount(updates.salary)
       : employee.salary;
-  if (nextSalary < 0) {
+  const nextCompensationType =
+    updates.compensationType !== undefined || updates.compensation_type !== undefined
+      ? normalizeCompensationType(updates.compensationType ?? updates.compensation_type)
+      : normalizeCompensationType(employee.compensation_type);
+  const nextCommissionPercent = nextCompensationType === "commission"
+    ? updates.commissionPercent !== undefined || updates.commission_percent !== undefined
+      ? normalizeCommissionPercent(updates.commissionPercent ?? updates.commission_percent)
+      : normalizeCommissionPercent(employee.commission_percent)
+    : 0;
+  const nextStoredSalary = nextCompensationType === "commission" ? 0 : nextSalary;
+
+  if (nextStoredSalary < 0) {
     const error = new Error("Salary cannot be negative");
     error.statusCode = 400;
     throw error;
+  }
+
+  if (nextCompensationType === "commission") {
+    const role = normalizeRoleValue(employee.role);
+    if (role !== "tme") {
+      const error = new Error("Commission payout is available only for TME role");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (nextCommissionPercent <= 0 || nextCommissionPercent > 100) {
+      const error = new Error("Commission percent must be between 0 and 100");
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   const nextDepartment =
@@ -13706,13 +13930,16 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
   }
 
   const departmentChanged = String(employee.department || "") !== nextDepartment;
-  const salaryChanged = Number(employee.salary || 0) !== Number(nextSalary || 0);
+  const salaryChanged = Number(employee.salary || 0) !== Number(nextStoredSalary || 0);
+  const compensationChanged =
+    normalizeCompensationType(employee.compensation_type) !== nextCompensationType ||
+    normalizeCommissionPercent(employee.commission_percent) !== nextCommissionPercent;
   const joiningDateChanged =
     String(employee.joining_date || "") !== String(nextJoiningDate || "");
   const teamLeadChanged =
     Number(employee.is_team_lead || 0) !== Number(nextIsTeamLead || 0);
 
-  if (!departmentChanged && !salaryChanged && !joiningDateChanged && !teamLeadChanged) {
+  if (!departmentChanged && !salaryChanged && !compensationChanged && !joiningDateChanged && !teamLeadChanged) {
     return employee;
   }
 
@@ -13722,13 +13949,17 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
       SET
         department = ?,
         salary = ?,
+        compensation_type = ?,
+        commission_percent = ?,
         joining_date = ?,
         is_team_lead = ?
       WHERE id = ?
     `,
     [
       nextDepartment || null,
-      Number(nextSalary.toFixed(2)),
+      Number(nextStoredSalary.toFixed(2)),
+      nextCompensationType,
+      nextCommissionPercent,
       nextJoiningDate,
       nextIsTeamLead,
       normalizedUserId,
@@ -13755,7 +13986,7 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
     [
       normalizedUserId,
       Number(employee.salary || 0),
-      Number(nextSalary.toFixed(2)),
+      Number(nextStoredSalary.toFixed(2)),
       employee.department || null,
       nextDepartment || null,
       employee.joining_date || null,
@@ -13774,12 +14005,16 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
     payload: {
       previous: {
         salary: employee.salary,
+        compensationType: employee.compensation_type,
+        commissionPercent: employee.commission_percent,
         department: employee.department,
         joiningDate: employee.joining_date,
         isTeamLead: employee.is_team_lead,
       },
       next: {
-        salary: nextSalary,
+        salary: nextStoredSalary,
+        compensationType: nextCompensationType,
+        commissionPercent: nextCommissionPercent,
         department: nextDepartment,
         joiningDate: nextJoiningDate,
         isTeamLead: nextIsTeamLead,
@@ -13900,6 +14135,10 @@ function buildPayrollCsv(rows = []) {
     "Role",
     "Department",
     "Month",
+    "Pay Type",
+    "Commission %",
+    "Commission Sales",
+    "Commission Amount",
     "Basic Salary",
     "Paid Leaves",
     "Unpaid Leaves",
@@ -13923,6 +14162,10 @@ function buildPayrollCsv(rows = []) {
         row.roleLabel,
         row.department,
         row.monthKey,
+        row.compensationType || "salary",
+        row.commissionPercent || 0,
+        row.commissionSalesAmount || 0,
+        row.commissionAmount || 0,
         row.basicSalary,
         row.paidLeaveDays,
         row.unpaidLeaveDays,
@@ -14070,6 +14313,8 @@ app.post("/api/payroll/admin/generate", async (req, res) => {
         actorId: adminId,
         overrides: {
           salary: payload.salary,
+          compensationType: payload.compensationType ?? payload.compensation_type,
+          commissionPercent: payload.commissionPercent ?? payload.commission_percent,
           department: payload.department,
           joiningDate: payload.joiningDate,
           isTeamLead: payload.isTeamLead,
@@ -17142,7 +17387,7 @@ app.get("/api/proposals/:id/word", async (req, res) => {
 });
 
 app.post("/api/proposals/:id/send-email", async (req, res) => {
-  const toEmail = String(req.body?.to_email || "").trim();
+  const toEmail = String(req.body?.toEmail || req.body?.to_email || "").trim();
 
   if (!toEmail) {
     return res.status(400).json({
@@ -17342,27 +17587,6 @@ app.post("/api/razorpay/verify", (req, res) => {
   }
 
   res.json({ success: true });
-});
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: false,
-
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-
-  tls: {
-    rejectUnauthorized: false,
-  },
-
-  requireTLS: true,
-
-  connectionTimeout: 60000,
-  greetingTimeout: 30000,
-  socketTimeout: 60000,
 });
 
 app.listen(PORT, () => {
