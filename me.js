@@ -1473,6 +1473,7 @@ function setProposalStatusText(text) {
 function getProposalPayload() {
   return {
     client_name: document.getElementById("proposalClientName")?.value.trim() || "",
+    client_email: document.getElementById("proposalClientEmail")?.value.trim() || "",
     company_name: document.getElementById("proposalCompanyName")?.value.trim() || "",
     project_topic: document.getElementById("proposalProjectTopic")?.value.trim() || "",
     requirement_details:
@@ -1489,6 +1490,7 @@ function getProposalPayload() {
 function setProposalFormValues(proposal = {}) {
   const fields = {
     proposalClientName: proposal.client_name || "",
+    proposalClientEmail: proposal.client_email || "",
     proposalCompanyName: proposal.company_name || "",
     proposalProjectTopic: proposal.project_topic || "",
     proposalRequirementDetails: proposal.requirement_details || "",
@@ -1511,6 +1513,7 @@ function rememberProposalSummary(proposal = {}) {
   const summary = {
     id,
     client_name: proposal.client_name || "",
+    client_email: proposal.client_email || "",
     company_name: proposal.company_name || "",
     project_topic: proposal.project_topic || "",
     status: proposal.status || "draft",
@@ -1582,6 +1585,15 @@ function downloadProposalBlob(blob, fileName) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadProposalFromUrl(pdfUrl, fileName) {
+  const link = document.createElement("a");
+  link.href = pdfUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 async function getProposalSnapshot(proposalId = currentProposalId, { saveCurrent = false } = {}) {
@@ -1902,6 +1914,31 @@ function getProposalPdfShareUrl(proposalId) {
   return `${BASE_URL}/api/proposals/${proposalId}/pdf`;
 }
 
+function getProposalEmailDetails(proposal = {}) {
+  const company = proposal.company_name || proposal.client_name || "client";
+  const topic = proposal.project_topic || "Project Proposal";
+  return {
+    subject: `Project Proposal - ${company}`,
+    body: `Hi,\n\nPlease find the attached ${topic} proposal PDF for ${company}.\n\nRegards,\nMetrics Mart`,
+  };
+}
+
+function openProposalEmailDraftWindow(popup, email, proposal = {}) {
+  const details = getProposalEmailDetails(proposal);
+  const gmailUrl =
+    `https://mail.google.com/mail/?view=cm&fs=1` +
+    `&to=${encodeURIComponent(email)}` +
+    `&su=${encodeURIComponent(details.subject)}` +
+    `&body=${encodeURIComponent(details.body)}`;
+
+  if (popup && !popup.closed) {
+    popup.location.href = gmailUrl;
+    return;
+  }
+
+  window.open(gmailUrl, "_blank");
+}
+
 async function persistCurrentProposal(status = "draft", { silent = false } = {}) {
   if (!currentProposalId) {
     throw new Error("Please generate or open a proposal first.");
@@ -1918,6 +1955,7 @@ async function persistCurrentProposal(status = "draft", { silent = false } = {})
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...getProposalPayload(),
         proposal_content: proposalContent,
         status,
       }),
@@ -2178,7 +2216,9 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
     return;
   }
 
-  const popup = openProposalActionWindow();
+  const popup = null;
+  let pdfBlob = null;
+  let fileName = "";
 
   try {
     if (Number(proposalId) === Number(currentProposalId)) {
@@ -2193,11 +2233,10 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
     const proposal = await getProposalSnapshot(proposalId);
     const topic = proposal.project_topic || "Project Proposal";
     const company = proposal.company_name || "your company";
-    const pdfUrl = getProposalPdfShareUrl(proposalId);
-    const message = `Hello, please find the ${topic} proposal PDF for ${company}:\n${pdfUrl}`;
+    const message = `Project Proposal - ${company}`;
     setProposalStatusText("Preparing proposal PDF for WhatsApp...");
-    const pdfBlob = await fetchProposalPdfBlob(proposalId);
-    const fileName = `${getProposalFileBaseName(proposal)}.pdf`;
+    pdfBlob = await fetchProposalPdfBlob(proposalId);
+    fileName = `${getProposalFileBaseName(proposal)}.pdf`;
     const file =
       typeof File === "function"
         ? new File([pdfBlob], fileName, {
@@ -2216,31 +2255,25 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
           text: message,
           files: [file],
         });
-        if (popup) popup.close();
         setProposalStatusText(`Proposal #${proposalId} PDF is ready for WhatsApp.`);
         showPopup("Shared", "Proposal PDF shared successfully.", true);
         return;
       } catch (shareErr) {
         if (shareErr?.name === "AbortError") {
-          if (popup) popup.close();
           return;
         }
-        console.warn("Native proposal PDF share failed, falling back to WhatsApp PDF link.", shareErr);
+        console.warn("Native proposal PDF share failed, downloading PDF for manual WhatsApp attach.", shareErr);
       }
     }
 
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-
-    if (popup) {
-      popup.location.href = whatsappUrl;
-    } else {
-      window.location.href = whatsappUrl;
-    }
-    setProposalStatusText(`Proposal #${proposalId} WhatsApp draft opened with PDF link.`);
-    showPopup("WhatsApp Ready", "WhatsApp draft proposal PDF link ke saath open ho gaya.", true);
+    downloadProposalBlob(pdfBlob, fileName);
+    setProposalStatusText(`Proposal #${proposalId} PDF downloaded for WhatsApp.`);
+    showPopup("PDF Ready", "PDF download ho gaya. WhatsApp me file attach karke send karo.", true);
   } catch (err) {
-    if (popup) popup.close();
     if (err?.name === "AbortError") return;
+    if (pdfBlob && fileName) {
+      downloadProposalBlob(pdfBlob, fileName);
+    }
     console.error("Proposal WhatsApp Error:", err);
     showPopup("WhatsApp Error", err.message || "Failed to share proposal", false);
   }
@@ -2252,42 +2285,36 @@ async function sendProposalEmail(proposalId = currentProposalId) {
     return;
   }
 
-  const toEmail = prompt("Client email address");
-  if (!toEmail) return;
-
-  const cleanedEmail = toEmail.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
-    showPopup("Invalid Email", "Please enter a valid client email address.", false);
-    return;
-  }
+  setProposalStatusText("Preparing proposal PDF email...");
 
   try {
     if (Number(proposalId) === Number(currentProposalId)) {
       await persistCurrentProposal("draft", { silent: true });
     }
 
-    setProposalStatusText("Preparing proposal PDF email...");
+    const proposal = await getProposalSnapshot(proposalId);
+    const autoEmail = String(proposal.client_email || "").trim();
+    const toEmail = autoEmail || prompt("Client email address");
+    if (!toEmail) return;
 
-    const res = await fetchProposalRequest(
-      `${BASE_URL}/api/proposals/${proposalId}/send-email`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toEmail: cleanedEmail }),
-      },
-      "Proposal email API",
-    );
-    const data = await parseProposalApiResponse(res, "Proposal email API");
-
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Failed to send email");
+    const cleanedEmail = toEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+      showPopup("Invalid Email", "Please enter a valid client email address.", false);
+      return;
     }
 
-    setProposalStatusText(`Proposal #${proposalId} PDF emailed to ${cleanedEmail}.`);
-    showPopup("Email Sent", data.message || "Proposal emailed successfully.", true);
+    downloadProposalFromUrl(
+      `${getProposalPdfShareUrl(proposalId)}?t=${Date.now()}`,
+      `${getProposalFileBaseName(proposal)}.pdf`,
+    );
+    window.setTimeout(() => {
+      openProposalEmailDraftWindow(null, cleanedEmail, proposal);
+    }, 800);
+    setProposalStatusText(`Proposal #${proposalId} PDF downloaded for email.`);
+    showPopup("Email Draft", "PDF download ho gaya aur Gmail open ho raha hai. PDF drag-drop karke send karo.", true);
   } catch (err) {
     console.error("Proposal Email Error:", err);
-    showPopup("Email Error", err.message || "Failed to send proposal email", false);
+    showPopup("Email Error", err.message || "Failed to open proposal email draft", false);
   }
 }
 
