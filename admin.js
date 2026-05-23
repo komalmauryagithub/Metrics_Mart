@@ -66,7 +66,7 @@ let adminDashboardCache = {
 const BASE_URL =
     window.location.protocol === "file:" || ["localhost", "127.0.0.1"].includes(window.location.hostname)
         ? "http://localhost:3000"
-        : window.location.origin || "https://metrics-mart.onrender.com";
+        : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
 
 async function parseAdminApiResponse(response, routeLabel = "Admin API") {
     const text = await response.text();
@@ -139,6 +139,7 @@ window.onload = function () {
     setupUserRegistrationForm();
     setupAdminLeadForm();
     setupProposalTemplateForm();
+    window.AdminProposals?.setup();
     loadAdminData();
 };
 
@@ -887,6 +888,10 @@ function showSection(id) {
     }
     if (id === 'salary') {
         window.PayrollUI?.handleSectionShown('salary');
+    }
+    if (id === 'proposals') {
+        window.AdminProposals?.setup();
+        window.AdminProposals?.load();
     }
     if (id === 'proposalTemplates') loadProposalTemplates();
 }
@@ -2011,7 +2016,9 @@ function renderAdminEmployeeProfileRecord(user = {}) {
                 { label: "Role", value: formatAdminProfileLabel(user.role) },
                 { label: "Department", value: user.department || formatAdminProfileLabel(user.role) },
                 { label: "Company", value: user.comp_name },
+                { label: "Pay type", value: String(user.compensation_type || "salary").toUpperCase() },
                 { label: "Monthly salary", value: formatAdminProfileAmount(user.salary) },
+                { label: "Commission percent", value: String(user.compensation_type || "salary").toLowerCase() === "commission" ? `${Number(user.commission_percent || 0)}%` : "-" },
                 { label: "Login time", value: user.login_time },
                 { label: "Logout time", value: user.logout_time },
                 { label: "Address", value: user.address },
@@ -3476,6 +3483,40 @@ function toggleUserPfFields() {
     pfDetails.classList.toggle("hidden", pfEnabled.value !== "1");
 }
 
+function toggleUserCompensationFields() {
+    const form = getUserFormElement();
+    const role = String(form?.elements?.role?.value || "").toLowerCase().trim();
+    const typeField = form?.elements?.compensation_type;
+    const typeGroup = document.getElementById("userCompensationTypeGroup");
+    const salaryGroup = document.getElementById("userSalaryGroup");
+    const commissionGroup = document.getElementById("userCommissionGroup");
+    const salaryField = form?.elements?.salary;
+    const commissionField = form?.elements?.commission_percent;
+    const canUseCommission = role === "tme";
+    const isCommission =
+        canUseCommission &&
+        String(typeField?.value || "salary").toLowerCase() === "commission";
+
+    typeGroup?.classList.toggle("hidden", !canUseCommission);
+    if (typeField) {
+        typeField.disabled = !canUseCommission;
+        typeField.required = canUseCommission;
+        if (!canUseCommission) typeField.value = "salary";
+    }
+
+    salaryGroup?.classList.toggle("hidden", isCommission);
+    commissionGroup?.classList.toggle("hidden", !isCommission);
+
+    if (salaryField) {
+        salaryField.required = !isCommission;
+        if (isCommission) salaryField.value = "0";
+    }
+    if (commissionField) {
+        commissionField.required = isCommission;
+        if (!isCommission) commissionField.value = "";
+    }
+}
+
 function setupUserRegistrationForm() {
     const pfEnabled = document.getElementById("userPfEnabled");
     if (pfEnabled && !pfEnabled.dataset.bound) {
@@ -3491,7 +3532,20 @@ function setupUserRegistrationForm() {
         ifscField.dataset.bound = "true";
     }
 
+    const compensationType = getUserFormElement()?.elements?.compensation_type;
+    if (compensationType && !compensationType.dataset.bound) {
+        compensationType.addEventListener("change", toggleUserCompensationFields);
+        compensationType.dataset.bound = "true";
+    }
+
+    const roleField = getUserFormElement()?.elements?.role;
+    if (roleField && !roleField.dataset.compensationBound) {
+        roleField.addEventListener("change", toggleUserCompensationFields);
+        roleField.dataset.compensationBound = "true";
+    }
+
     toggleUserPfFields();
+    toggleUserCompensationFields();
 }
 
 function setUserFormRequiredState(isEditMode, hasExistingAadharImage = false) {
@@ -3578,8 +3632,15 @@ function resetUserFormState() {
     if (form?.elements?.pf_enabled) {
         form.elements.pf_enabled.value = "0";
     }
+    if (form?.elements?.compensation_type) {
+        form.elements.compensation_type.value = "salary";
+    }
+    if (form?.elements?.commission_percent) {
+        form.elements.commission_percent.value = "";
+    }
 
     toggleUserPfFields();
+    toggleUserCompensationFields();
 }
 
 function showUserFormModal() {
@@ -3656,6 +3717,12 @@ async function openUserEditForm(userId) {
             "salary",
             user.salary != null ? Number(user.salary || 0).toFixed(2) : "",
         );
+        setUserFieldValue(form, "compensation_type", user.compensation_type || "salary");
+        setUserFieldValue(
+            form,
+            "commission_percent",
+            user.commission_percent != null ? Number(user.commission_percent || 0).toFixed(2) : "",
+        );
         setUserFieldValue(form, "joining_date", formatUserDateInput(user.joining_date));
         setUserFieldValue(form, "total_experience", user.total_experience || "");
         setUserFieldValue(form, "pf_enabled", Number(user.pf_enabled || 0) ? "1" : "0");
@@ -3715,6 +3782,7 @@ async function openUserEditForm(userId) {
             user.attendance_face_enrolled ? "success" : "neutral",
         );
         toggleUserPfFields();
+        toggleUserCompensationFields();
     } catch (err) {
         console.error("Edit user load error:", err);
         showPopup("Error", err.message || "Unable to load user details", false);
@@ -4545,6 +4613,28 @@ if (adminRegisterForm) {
         if (fileValidationMessage) {
             showPopup("Error", fileValidationMessage, false);
             return;
+        }
+
+        const role = String(formData.get("role") || "").toLowerCase();
+        const compensationType =
+            role === "tme"
+                ? String(formData.get("compensation_type") || "salary").toLowerCase()
+                : "salary";
+        formData.set("compensation_type", compensationType);
+
+        if (compensationType === "commission") {
+            const percent = Number(formData.get("commission_percent") || 0);
+            if (role !== "tme") {
+                showPopup("Commission", "Commission payout sirf TME role ke liye hai.", false);
+                return;
+            }
+            if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+                showPopup("Commission", "Commission percent 0 se 100 ke beech hona chahiye.", false);
+                return;
+            }
+            formData.set("salary", "0");
+        } else {
+            formData.set("commission_percent", "0");
         }
 
         if (btn) {
