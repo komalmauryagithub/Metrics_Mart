@@ -1898,6 +1898,10 @@ async function fetchProposalPdfBlob(proposalId) {
   return res.blob();
 }
 
+function getProposalPdfShareUrl(proposalId) {
+  return `${BASE_URL}/api/proposals/${proposalId}/pdf`;
+}
+
 async function persistCurrentProposal(status = "draft", { silent = false } = {}) {
   if (!currentProposalId) {
     throw new Error("Please generate or open a proposal first.");
@@ -2189,7 +2193,8 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
     const proposal = await getProposalSnapshot(proposalId);
     const topic = proposal.project_topic || "Project Proposal";
     const company = proposal.company_name || "your company";
-    const message = `Hello, please find attached the ${topic} proposal PDF for ${company}.`;
+    const pdfUrl = getProposalPdfShareUrl(proposalId);
+    const message = `Hello, please find the ${topic} proposal PDF for ${company}:\n${pdfUrl}`;
     setProposalStatusText("Preparing proposal PDF for WhatsApp...");
     const pdfBlob = await fetchProposalPdfBlob(proposalId);
     const fileName = `${getProposalFileBaseName(proposal)}.pdf`;
@@ -2216,22 +2221,23 @@ async function shareProposalWhatsApp(proposalId = currentProposalId) {
         showPopup("Shared", "Proposal PDF shared successfully.", true);
         return;
       } catch (shareErr) {
-        if (shareErr?.name === "AbortError") return;
-        console.warn("Native proposal PDF share failed, falling back to PDF download.", shareErr);
+        if (shareErr?.name === "AbortError") {
+          if (popup) popup.close();
+          return;
+        }
+        console.warn("Native proposal PDF share failed, falling back to WhatsApp PDF link.", shareErr);
       }
     }
 
-    downloadProposalBlob(pdfBlob, fileName);
-    const fallbackMessage = `${message}\n\nPDF download ho gaya hai. WhatsApp chat me attach/file icon se downloaded PDF select karke send kar do.`;
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(fallbackMessage)}`;
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
 
     if (popup) {
       popup.location.href = whatsappUrl;
     } else {
       window.location.href = whatsappUrl;
     }
-    setProposalStatusText(`Proposal #${proposalId} PDF downloaded for WhatsApp.`);
-    showPopup("PDF Ready", "PDF download ho gaya. WhatsApp me downloaded PDF attach karke send karo.", true);
+    setProposalStatusText(`Proposal #${proposalId} WhatsApp draft opened with PDF link.`);
+    showPopup("WhatsApp Ready", "WhatsApp draft proposal PDF link ke saath open ho gaya.", true);
   } catch (err) {
     if (popup) popup.close();
     if (err?.name === "AbortError") return;
@@ -2267,7 +2273,7 @@ async function sendProposalEmail(proposalId = currentProposalId) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to_email: cleanedEmail }),
+        body: JSON.stringify({ toEmail: cleanedEmail }),
       },
       "Proposal email API",
     );
