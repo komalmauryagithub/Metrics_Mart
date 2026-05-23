@@ -1745,6 +1745,7 @@ function applyProposalPlaceholders(content, data = {}) {
   let output = String(content || "");
   const replacements = {
     client_name: data.client_name,
+    client_email: data.client_email,
     company_name: data.company_name,
     project_topic: data.project_topic,
     requirement_details: data.requirement_details,
@@ -2719,6 +2720,100 @@ function buildFriendlyFromAddress(email, name) {
   const parsed = splitEmailAddressAndName(email, name);
   if (!parsed.email) return "";
   return parsed.name ? `${parsed.name} <${parsed.email}>` : parsed.email;
+}
+
+function getFirstEnvValue(keys = []) {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim();
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function getWhatsappApiConfig() {
+  const accessToken = getFirstEnvValue([
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_API_TOKEN",
+    "META_WHATSAPP_ACCESS_TOKEN",
+    "META_WHATSAPP_API_TOKEN",
+  ]);
+  const phoneNumberId = getFirstEnvValue([
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "META_WHATSAPP_PHONE_NUMBER_ID",
+  ]);
+  const apiVersion = getFirstEnvValue([
+    "WHATSAPP_API_VERSION",
+    "META_WHATSAPP_API_VERSION",
+  ]) || "v20.0";
+
+  return {
+    configured: Boolean(accessToken && phoneNumberId),
+    accessToken,
+    phoneNumberId,
+    apiVersion: apiVersion.replace(/^\/+|\/+$/g, ""),
+    missingConfig: [
+      !accessToken ? "WHATSAPP_ACCESS_TOKEN" : "",
+      !phoneNumberId ? "WHATSAPP_PHONE_NUMBER_ID" : "",
+    ].filter(Boolean),
+  };
+}
+
+function normalizeWhatsappRecipientPhone(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) digits = `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) digits = `91${digits.slice(1)}`;
+  return digits;
+}
+
+async function sendProposalPdfViaWhatsapp(req, proposal, rawPhone) {
+  const config = getWhatsappApiConfig();
+  if (!config.configured) {
+    const error = new Error(
+      "Direct WhatsApp PDF send is not configured. Add WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID on the live server.",
+    );
+    error.statusCode = 503;
+    error.missingConfig = config.missingConfig;
+    throw error;
+  }
+
+  const to = normalizeWhatsappRecipientPhone(rawPhone);
+  if (!to || to.length < 11 || to.length > 15) {
+    const error = new Error("Valid WhatsApp number with country code is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const companyLabel = String(
+    proposal.company_name || proposal.client_name || `Proposal ${proposal.id}`,
+  ).trim();
+  const fileName = `proposal_${proposal.id}.pdf`;
+  const pdfUrl = `${resolveAppBaseUrl(req)}/api/proposals/${proposal.id}/pdf`;
+  const endpoint = `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`;
+
+  await postJsonViaHttps(
+    endpoint,
+    {
+      Authorization: `Bearer ${config.accessToken}`,
+    },
+    {
+      messaging_product: "whatsapp",
+      to,
+      type: "document",
+      document: {
+        link: pdfUrl,
+        filename: fileName,
+        caption: `Project Proposal - ${companyLabel}`,
+      },
+    },
+  );
+
+  return {
+    to,
+    pdfUrl,
+    fileName,
+  };
 }
 
 function postJsonViaHttps(url, headers, payload, timeoutMs = 25000) {
@@ -4885,6 +4980,7 @@ async function ensureProposalTables() {
     CREATE TABLE IF NOT EXISTS proposals (
       id int NOT NULL AUTO_INCREMENT,
       client_name varchar(255) DEFAULT NULL,
+      client_email varchar(255) DEFAULT NULL,
       company_name varchar(255) DEFAULT NULL,
       project_topic varchar(255) DEFAULT NULL,
       requirement_details text DEFAULT NULL,
@@ -4903,9 +4999,15 @@ async function ensureProposalTables() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
 
+  await runSchemaChange(
+    "ALTER TABLE proposals ADD COLUMN client_email varchar(255) DEFAULT NULL AFTER client_name",
+    "ER_DUP_FIELDNAME",
+  );
+
   const templateContent = `PROJECT PROPOSAL
 
 Client Name: {{client_name}}
+Client Email: {{client_email}}
 Company Name: {{company_name}}
 Project Topic: {{project_topic}}
 
@@ -17121,6 +17223,7 @@ app.post("/api/generate-proposal", async (req, res) => {
     await ensureProposalTables();
     const payload = {
       client_name: String(req.body?.client_name || "").trim(),
+      client_email: String(req.body?.client_email || req.body?.email || "").trim(),
       company_name: String(req.body?.company_name || "").trim(),
       project_topic: String(req.body?.project_topic || "").trim(),
       requirement_details: String(req.body?.requirement_details || "").trim(),
@@ -17173,11 +17276,12 @@ app.post("/api/generate-proposal", async (req, res) => {
     const [result] = await dbPromise.query(
       `
         INSERT INTO proposals
-          (client_name, company_name, project_topic, requirement_details, budget, timeline, technology, notes, proposal_content, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (client_name, client_email, company_name, project_topic, requirement_details, budget, timeline, technology, notes, proposal_content, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         payload.client_name,
+        payload.client_email,
         payload.company_name,
         payload.project_topic,
         payload.requirement_details,
@@ -17218,7 +17322,7 @@ app.get("/api/proposals", async (req, res) => {
 
     const [rows] = await dbPromise.query(
       `
-        SELECT p.id, p.client_name, p.company_name, p.project_topic, p.status, p.created_at, p.updated_at,
+        SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, p.status, p.created_at, p.updated_at,
                u.name AS created_by_name
         FROM proposals p
         LEFT JOIN users u ON u.id = p.created_by
@@ -17263,6 +17367,11 @@ app.put("/api/proposals/:id", async (req, res) => {
     await ensureProposalTables();
     const proposalContent = normalizeProposalText(req.body?.proposal_content);
     const status = String(req.body?.status || "draft").trim().toLowerCase();
+    const body = req.body || {};
+    const optionalProposalField = (fieldName) =>
+      Object.prototype.hasOwnProperty.call(body, fieldName)
+        ? String(body[fieldName] || "").trim()
+        : null;
 
     if (!proposalContent) {
       return res.status(400).json({
@@ -17274,10 +17383,33 @@ app.put("/api/proposals/:id", async (req, res) => {
     const [result] = await dbPromise.query(
       `
         UPDATE proposals
-        SET proposal_content = ?, status = ?
+        SET client_name = COALESCE(?, client_name),
+            client_email = COALESCE(?, client_email),
+            company_name = COALESCE(?, company_name),
+            project_topic = COALESCE(?, project_topic),
+            requirement_details = COALESCE(?, requirement_details),
+            budget = COALESCE(?, budget),
+            timeline = COALESCE(?, timeline),
+            technology = COALESCE(?, technology),
+            notes = COALESCE(?, notes),
+            proposal_content = ?,
+            status = ?
         WHERE id = ?
       `,
-      [proposalContent, status || "draft", req.params.id],
+      [
+        optionalProposalField("client_name"),
+        optionalProposalField("client_email"),
+        optionalProposalField("company_name"),
+        optionalProposalField("project_topic"),
+        optionalProposalField("requirement_details"),
+        optionalProposalField("budget"),
+        optionalProposalField("timeline"),
+        optionalProposalField("technology"),
+        optionalProposalField("notes"),
+        proposalContent,
+        status || "draft",
+        req.params.id,
+      ],
     );
 
     if (!result.affectedRows) {
@@ -17487,6 +17619,43 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to send proposal email",
+    });
+  }
+});
+
+app.post("/api/proposals/:id/send-whatsapp", async (req, res) => {
+  const phone = String(req.body?.phone || req.body?.whatsapp || req.body?.contact || "").trim();
+
+  if (!phone) {
+    return res.status(400).json({
+      success: false,
+      message: "Client WhatsApp number is required",
+    });
+  }
+
+  try {
+    const proposal = await getProposalById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+    }
+
+    const dispatch = await sendProposalPdfViaWhatsapp(req, proposal, phone);
+
+    return res.json({
+      success: true,
+      message: `Proposal PDF sent on WhatsApp to ${dispatch.to}.`,
+      provider: "whatsapp-cloud-api",
+      data: dispatch,
+    });
+  } catch (error) {
+    console.error("Proposal WhatsApp send failed:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Failed to send proposal PDF on WhatsApp",
+      missingConfig: error.missingConfig || [],
     });
   }
 });
