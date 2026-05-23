@@ -2,7 +2,11 @@
   "use strict";
 
   const SHIELD_MESSAGE = "Screen protected";
+  const SHORTCUT_SHIELD_DURATION_MS = 2400;
+  const SCREENSHOT_SHIELD_DURATION_MS = 6000;
+  const SHIFT_SCREENSHOT_DELAY_MS = 120;
   const WATERMARK_COUNT = 36;
+  let pendingShiftShieldTimer = null;
 
   function getCurrentUser() {
     try {
@@ -43,6 +47,23 @@
     return shield;
   }
 
+  function canHideShield() {
+    return !document.hidden && (!document.hasFocus || document.hasFocus());
+  }
+
+  function clearPendingShiftShield() {
+    window.clearTimeout(pendingShiftShieldTimer);
+    pendingShiftShieldTimer = null;
+  }
+
+  function armShiftScreenshotShield() {
+    clearPendingShiftShield();
+    pendingShiftShieldTimer = window.setTimeout(() => {
+      pendingShiftShieldTimer = null;
+      showShield(SCREENSHOT_SHIELD_DURATION_MS);
+    }, SHIFT_SCREENSHOT_DELAY_MS);
+  }
+
   function showShield(duration = 1600) {
     const shield = ensureShield();
     document.documentElement.classList.add("crm-blackout");
@@ -50,24 +71,32 @@
 
     window.clearTimeout(showShield.hideTimer);
     showShield.hideTimer = window.setTimeout(() => {
-      if (!document.hidden) {
+      if (canHideShield()) {
         document.documentElement.classList.remove("crm-blackout");
         shield.classList.remove("is-visible");
       }
     }, duration);
   }
 
-  function showInstantBlackout(duration = 2500) {
-    window.clearTimeout(showInstantBlackout.timer);
-    showShield(duration);
-  }
-
   function hideShield() {
-    if (document.hidden) return;
+    if (!canHideShield()) return;
 
     const shield = ensureShield();
     document.documentElement.classList.remove("crm-blackout");
     shield.classList.remove("is-visible");
+  }
+
+  function isShiftTypingInput(event, hasWindowsModifier) {
+    const key = String(event.key || "");
+    return (
+      event.type === "keydown" &&
+      event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !hasWindowsModifier &&
+      key.length === 1
+    );
   }
 
   function buildWatermark() {
@@ -97,7 +126,6 @@
     const isPrint = event.ctrlKey && key === "p";
     const isSave = event.ctrlKey && key === "s";
     const isViewSource = event.ctrlKey && key === "u";
-    const isShiftPressed = event.key === "Shift" || event.shiftKey;
     const hasWindowsModifier =
       event.metaKey ||
       event.getModifierState?.("Meta") ||
@@ -107,9 +135,22 @@
       event.key === "F12" ||
       (event.ctrlKey && event.shiftKey && ["i", "j", "c"].includes(key));
     const isPrintScreen = event.key === "PrintScreen";
+    const isScreenshotShortcut = isPrintScreen || isWindowsSnip;
 
-    if (isShiftPressed) {
-      showInstantBlackout(2500);
+    if (event.type === "keyup" && event.key === "Shift") {
+      clearPendingShiftShield();
+      return;
+    }
+
+    if (isShiftTypingInput(event, hasWindowsModifier)) {
+      clearPendingShiftShield();
+      hideShield();
+      return;
+    }
+
+    if (event.type === "keydown" && event.key === "Shift") {
+      armShiftScreenshotShield();
+      return;
     }
 
     if (
@@ -117,11 +158,15 @@
       isSave ||
       isViewSource ||
       isDevtools ||
-      isPrintScreen ||
-      isWindowsSnip
+      isScreenshotShortcut
     ) {
       event.preventDefault();
-      showShield(isPrintScreen || isWindowsSnip ? 3000 : 2400);
+      clearPendingShiftShield();
+      showShield(
+        isScreenshotShortcut
+          ? SCREENSHOT_SHIELD_DURATION_MS
+          : SHORTCUT_SHIELD_DURATION_MS,
+      );
 
       if (isPrintScreen && navigator.clipboard?.writeText) {
         navigator.clipboard.writeText("").catch(() => {});
@@ -130,14 +175,19 @@
   }
 
   function handleVisibilityChange() {
+    if (document.hidden) {
+      clearPendingShiftShield();
+    }
     document.documentElement.classList.toggle("crm-screen-hidden", document.hidden);
   }
 
   function handleWindowBlur() {
-    showShield(6000);
+    clearPendingShiftShield();
+    showShield(SCREENSHOT_SHIELD_DURATION_MS);
   }
 
   function handleWindowFocus() {
+    clearPendingShiftShield();
     window.clearTimeout(handleWindowFocus.timer);
     handleWindowFocus.timer = window.setTimeout(hideShield, 1200);
   }
