@@ -15,7 +15,7 @@ const PROFILE_BASE_URL =
   window.location.protocol === "file:" ||
   ["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://localhost:3000"
-    : window.location.origin || "https://metrics-mart.onrender.com";
+    : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
 const profileSearchParams = new URLSearchParams(window.location.search);
 function normalizeProfileToken(value) {
   const tokenMatch = String(value || "").match(/[a-f0-9]{64}/i);
