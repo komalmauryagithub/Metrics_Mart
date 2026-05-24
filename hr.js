@@ -33,6 +33,7 @@ const HR_ROLE_LABELS = {
   dm: "DM",
 };
 const HR_SALES_COMPENSATION_ROLES = new Set(["tme", "me"]);
+const FIXED_SALES_COMMISSION_PERCENT = 10;
 
 const HR_ROLE_TARGETS = [
   { role: "hr", label: "HR Executive", target: 2, department: "People Ops" },
@@ -214,7 +215,14 @@ function toggleHrUserCompensationFields() {
   }
   if (commissionField) {
     commissionField.required = isCommission;
-    if (!isCommission) commissionField.value = "";
+    commissionField.readOnly = isCommission;
+    if (isCommission) {
+      commissionField.value = String(FIXED_SALES_COMMISSION_PERCENT);
+    }
+    if (!isCommission) {
+      commissionField.value = "";
+      commissionField.readOnly = false;
+    }
   }
 }
 
@@ -3033,16 +3041,12 @@ async function submitHrUserRegistration(event) {
   formData.set("compensation_type", compensationType);
 
   if (compensationType === "commission") {
-    const percent = Number(formData.get("commission_percent") || 0);
     if (!canUseSalesCompensation) {
       showToast("Commission payout sirf ME/TME role ke liye hai.", true);
       return;
     }
-    if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
-      showToast("Commission percent 0 se 100 ke beech hona chahiye.", true);
-      return;
-    }
     formData.set("salary", "0");
+    formData.set("commission_percent", String(FIXED_SALES_COMMISSION_PERCENT));
   } else {
     formData.set("commission_percent", "0");
   }
