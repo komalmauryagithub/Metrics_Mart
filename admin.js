@@ -39,6 +39,7 @@ const USER_REGISTRATION_ALLOWED_EXTENSIONS = new Set([
     ".doc",
     ".docx",
 ]);
+const SALES_COMPENSATION_ROLES = new Set(["tme", "me"]);
 
 const adminDashboardState = {
     salesTarget: {
@@ -3492,7 +3493,7 @@ function toggleUserCompensationFields() {
     const commissionGroup = document.getElementById("userCommissionGroup");
     const salaryField = form?.elements?.salary;
     const commissionField = form?.elements?.commission_percent;
-    const canUseCommission = role === "tme";
+    const canUseCommission = SALES_COMPENSATION_ROLES.has(role);
     const isCommission =
         canUseCommission &&
         String(typeField?.value || "salary").toLowerCase() === "commission";
@@ -4616,16 +4617,16 @@ if (adminRegisterForm) {
         }
 
         const role = String(formData.get("role") || "").toLowerCase();
-        const compensationType =
-            role === "tme"
-                ? String(formData.get("compensation_type") || "salary").toLowerCase()
-                : "salary";
+        const canUseSalesCompensation = SALES_COMPENSATION_ROLES.has(role);
+        const compensationType = canUseSalesCompensation
+            ? String(formData.get("compensation_type") || "salary").toLowerCase()
+            : "salary";
         formData.set("compensation_type", compensationType);
 
         if (compensationType === "commission") {
             const percent = Number(formData.get("commission_percent") || 0);
-            if (role !== "tme") {
-                showPopup("Commission", "Commission payout sirf TME role ke liye hai.", false);
+            if (!canUseSalesCompensation) {
+                showPopup("Commission", "Commission payout sirf ME/TME role ke liye hai.", false);
                 return;
             }
             if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
