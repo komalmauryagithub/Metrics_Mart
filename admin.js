@@ -40,6 +40,7 @@ const USER_REGISTRATION_ALLOWED_EXTENSIONS = new Set([
     ".docx",
 ]);
 const SALES_COMPENSATION_ROLES = new Set(["tme", "me"]);
+const FIXED_SALES_COMMISSION_PERCENT = 10;
 
 const adminDashboardState = {
     salesTarget: {
@@ -328,7 +329,7 @@ function renderAdminTeamTargets(items = [], summary = {}) {
 
         summaryText.textContent = totalMembers
             ? `${achievedMembers}/${totalMembers} achieved | ${formatSalesSummaryMoney(totalAchieved)} of ${formatSalesSummaryMoney(totalTarget)}`
-            : "Assign monthly targets and monitor live achievement.";
+            : "Auto salary targets and monitor live achievement.";
     }
 
     if (!items.length) {
@@ -343,6 +344,60 @@ function renderAdminTeamTargets(items = [], summary = {}) {
         const dealsCount = Number(item.dealsCount || 0);
         const isAchieved = Boolean(item.isAchieved);
         const inputValue = Number.isFinite(target) ? Number(target.toFixed(0)) : 0;
+        const targetSource = String(item.targetSource || "").toLowerCase();
+        const compensationType = String(item.compensationType || "salary").toLowerCase();
+        const isCommission = compensationType === "commission" || targetSource === "commission";
+        const salaryBasis = Number(item.targetBasis?.salary ?? item.salary ?? 0);
+        const incentiveRate = Number(item.incentiveRate || 0.07) * 100;
+        const targetControlMarkup = isCommission
+            ? `
+                <div class="team-target-input-wrap">
+                    <small class="team-target-meta">
+                        Commission based profile. Monthly target and target incentive are not required.
+                    </small>
+                    <small class="team-target-meta">
+                        Flat ${FIXED_SALES_COMMISSION_PERCENT}% commission is calculated on closed sales.
+                    </small>
+                </div>
+            `
+            : targetSource === "salary_7x"
+                ? `
+                    <div class="team-target-input-wrap">
+                        <small class="team-target-meta">
+                            Auto target: ${escapeAdminHtml(formatSalesSummaryMoney(salaryBasis))} monthly salary x 7.
+                        </small>
+                        <small class="team-target-meta">
+                            Incentive: ${incentiveRate.toFixed(0)}% after monthly target completion.
+                        </small>
+                        <small class="team-target-meta">
+                            ${dealsCount} closed deal${dealsCount === 1 ? "" : "s"} this month${isAchieved ? " | Target completed" : ""}
+                        </small>
+                    </div>
+                `
+                : `
+                    <div class="team-target-input-wrap">
+                        <label for="adminTeamTargetInput-${Number(item.userId || 0)}">Set Monthly Target</label>
+                        <div class="team-target-input-row">
+                            <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                id="adminTeamTargetInput-${Number(item.userId || 0)}"
+                                value="${inputValue}"
+                            />
+                            <button
+                                type="button"
+                                class="team-target-save-btn"
+                                onclick="saveAdminTeamTarget(${Number(item.userId || 0)}, this)"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        <small class="team-target-meta">
+                            ${dealsCount} closed deal${dealsCount === 1 ? "" : "s"} this month${isAchieved ? " | Target completed" : ""}
+                        </small>
+                    </div>
+                `;
 
         return `
             <article class="team-target-card${isAchieved ? " is-achieved" : ""}">
@@ -351,46 +406,25 @@ function renderAdminTeamTargets(items = [], summary = {}) {
                         <strong>${escapeAdminHtml(item.name || "Employee")}</strong>
                         <span class="team-target-role">${escapeAdminHtml(item.roleLabel || "EMPLOYEE")}</span>
                     </div>
-                    <span class="team-target-status ${isAchieved ? "achieved" : "pending"}">
-                        ${isAchieved ? "Achieved" : "In Progress"}
+                    <span class="team-target-status ${isCommission || isAchieved ? "achieved" : "pending"}">
+                        ${isCommission ? "Commission" : isAchieved ? "Achieved" : "In Progress"}
                     </span>
                 </div>
                 <div class="team-target-stats">
                     <div class="team-target-stat">
-                        <span>Target</span>
-                        <strong>${escapeAdminHtml(formatSalesSummaryMoney(target))}</strong>
+                        <span>${isCommission ? "Rate" : "Target"}</span>
+                        <strong>${isCommission ? `${FIXED_SALES_COMMISSION_PERCENT}%` : escapeAdminHtml(formatSalesSummaryMoney(target))}</strong>
                     </div>
                     <div class="team-target-stat">
-                        <span>Achieved</span>
+                        <span>${isCommission ? "Sales" : "Achieved"}</span>
                         <strong>${escapeAdminHtml(formatSalesSummaryMoney(achieved))}</strong>
                     </div>
                     <div class="team-target-stat">
-                        <span>Remaining</span>
-                        <strong>${escapeAdminHtml(formatSalesSummaryMoney(remaining))}</strong>
+                        <span>${isCommission ? "Commission" : "Remaining"}</span>
+                        <strong>${escapeAdminHtml(formatSalesSummaryMoney(isCommission ? item.commissionAmount : remaining))}</strong>
                     </div>
                 </div>
-                <div class="team-target-input-wrap">
-                    <label for="adminTeamTargetInput-${Number(item.userId || 0)}">Set Monthly Target</label>
-                    <div class="team-target-input-row">
-                        <input
-                            type="number"
-                            min="0"
-                            step="1000"
-                            id="adminTeamTargetInput-${Number(item.userId || 0)}"
-                            value="${inputValue}"
-                        />
-                        <button
-                            type="button"
-                            class="team-target-save-btn"
-                            onclick="saveAdminTeamTarget(${Number(item.userId || 0)}, this)"
-                        >
-                            Save
-                        </button>
-                    </div>
-                    <small class="team-target-meta">
-                        ${dealsCount} closed deal${dealsCount === 1 ? "" : "s"} this month${isAchieved ? " | Target completed" : ""}
-                    </small>
-                </div>
+                ${targetControlMarkup}
             </article>
         `;
     }).join("");
@@ -1988,6 +2022,10 @@ function renderAdminEmployeeProfileRecord(user = {}) {
 
     const profileStatus = formatAdminProfileLabel(user.profile_setup_status || "pending");
     const pfEnabled = Number(user.pf_enabled || 0) ? "Yes" : "No";
+    const compensationType = String(user.compensation_type || "salary").toLowerCase();
+    const profileRole = String(user.role || "").toLowerCase().trim();
+    const monthlySalary = Number(user.salary || 0);
+    const autoTarget = monthlySalary * 7;
     const avatarUrl = getAdminProfileFileUrl(user.prof_img);
     const avatarMarkup = avatarUrl && isAdminProfileImageFile(user.prof_img)
         ? `<img src="${escapeAdminHtml(avatarUrl)}" alt="${escapeAdminHtml(user.name || "Employee")}" />`
@@ -2017,9 +2055,20 @@ function renderAdminEmployeeProfileRecord(user = {}) {
                 { label: "Role", value: formatAdminProfileLabel(user.role) },
                 { label: "Department", value: user.department || formatAdminProfileLabel(user.role) },
                 { label: "Company", value: user.comp_name },
-                { label: "Pay type", value: String(user.compensation_type || "salary").toUpperCase() },
-                { label: "Monthly salary", value: formatAdminProfileAmount(user.salary) },
-                { label: "Commission percent", value: String(user.compensation_type || "salary").toLowerCase() === "commission" ? `${Number(user.commission_percent || 0)}%` : "-" },
+                { label: "Pay type", value: compensationType.toUpperCase() },
+                ...(compensationType === "commission"
+                    ? [
+                        { label: "Commission percent", value: `${FIXED_SALES_COMMISSION_PERCENT}% fixed` },
+                    ]
+                    : [
+                        { label: "Monthly salary", value: formatAdminProfileAmount(user.salary) },
+                        ...(SALES_COMPENSATION_ROLES.has(profileRole)
+                            ? [
+                                { label: "Auto target", value: `${formatAdminProfileAmount(autoTarget)} (salary x 7)` },
+                                { label: "Target incentive", value: "7% after monthly target completion" },
+                            ]
+                            : []),
+                    ]),
                 { label: "Login time", value: user.login_time },
                 { label: "Logout time", value: user.logout_time },
                 { label: "Address", value: user.address },
@@ -3514,7 +3563,14 @@ function toggleUserCompensationFields() {
     }
     if (commissionField) {
         commissionField.required = isCommission;
-        if (!isCommission) commissionField.value = "";
+        commissionField.readOnly = isCommission;
+        if (isCommission) {
+            commissionField.value = String(FIXED_SALES_COMMISSION_PERCENT);
+        }
+        if (!isCommission) {
+            commissionField.value = "";
+            commissionField.readOnly = false;
+        }
     }
 }
 
@@ -4624,16 +4680,12 @@ if (adminRegisterForm) {
         formData.set("compensation_type", compensationType);
 
         if (compensationType === "commission") {
-            const percent = Number(formData.get("commission_percent") || 0);
             if (!canUseSalesCompensation) {
                 showPopup("Commission", "Commission payout sirf ME/TME role ke liye hai.", false);
                 return;
             }
-            if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
-                showPopup("Commission", "Commission percent 0 se 100 ke beech hona chahiye.", false);
-                return;
-            }
             formData.set("salary", "0");
+            formData.set("commission_percent", String(FIXED_SALES_COMMISSION_PERCENT));
         } else {
             formData.set("commission_percent", "0");
         }
