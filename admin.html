@@ -446,7 +446,7 @@
                 <div>
                   <h3>ME & TME Target Board</h3>
                   <p id="adminTeamTargetsSummary">
-                    Assign monthly targets and monitor live achievement.
+                    Auto salary targets and monitor live achievement.
                   </p>
                 </div>
                 <button
@@ -1620,14 +1620,16 @@
                       />
                     </div>
                     <div class="input-group hidden" id="userCommissionGroup">
-                      <label>Commission Percent *</label>
+                      <label>Commission Percent (Fixed)</label>
                       <input
                         type="number"
                         name="commission_percent"
                         min="0"
                         max="100"
                         step="0.01"
-                        placeholder="e.g. 5"
+                        value="10"
+                        readonly
+                        placeholder="10"
                       />
                     </div>
                     <div class="input-group">
@@ -1990,8 +1992,8 @@
       </div>
     </div>
     <script src="project-tracker.js"></script>
-    <script src="payroll-management.js?v=20260523-tme-payment"></script>
-    <script src="admin.js?v=20260524-me-pay-type"></script>
+    <script src="payroll-management.js?v=20260524-fixed-commission"></script>
+    <script src="admin.js?v=20260524-fixed-commission"></script>
     <script src="admin-proposals.js?v=20260523-proposal-email-auto"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260523-shift-snipsafe"></script>
