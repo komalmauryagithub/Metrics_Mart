@@ -8,6 +8,7 @@ let meLeadSubmitting = false;
 let meTargetProgressChart = null;
 let meDashboardChart = null;
 const MONTHLY_TARGET = 200000;
+const FIXED_SALES_COMMISSION_PERCENT = 10;
 let currentMonthlyTarget = MONTHLY_TARGET;
 let dealProductsCatalog = null;
 let leadDownsaleRequests = [];
@@ -427,6 +428,10 @@ function resetMeLeadFormState() {
     form.reset();
   }
 
+  if (form?.elements?.sales_type) {
+    form.elements.sales_type.value = "new";
+  }
+
   if (employeeSelect) {
     employeeSelect.innerHTML = '<option value="">Select Employee</option>';
   }
@@ -598,6 +603,7 @@ async function handleMeLeadFormSubmit(event) {
     maps_lnk: mapsLink,
     source_lead: formData.get("source_lead"),
     industry_type: formData.get("industry_type"),
+    sales_type: formData.get("sales_type") || "new",
     web_type: formData.getAll("web_type[]"),
     seo_type: formData.getAll("seo_type[]"),
     smo_type: formData.getAll("smo_type[]"),
@@ -663,6 +669,12 @@ function setSalesTargetText(id, value) {
   if (element) element.textContent = value;
 }
 
+function setSalesTargetMetricLabel(valueId, label) {
+  const valueElement = document.getElementById(valueId);
+  const labelElement = valueElement?.parentElement?.querySelector("span");
+  if (labelElement) labelElement.textContent = label;
+}
+
 function formatSalesTargetMoney(value) {
   const amount = Number(value || 0);
   return `Rs. ${amount.toLocaleString("en-IN", {
@@ -717,7 +729,75 @@ function updateMeTargetProgressInsights(target, achieved, remaining) {
   );
 }
 
+function isCommissionSalesSummary(data = {}) {
+  return (
+    data.isCommissionProfile === true ||
+    String(data.compensationType || "").toLowerCase() === "commission"
+  );
+}
+
+function applyMeCommissionSummary(prefix, data = {}) {
+  const achieved = Number(data.achieved || 0);
+  const commissionPercent = Number(
+    data.commissionPercent || FIXED_SALES_COMMISSION_PERCENT,
+  );
+  const commissionAmount = Number(
+    data.commissionAmount ?? ((achieved * commissionPercent) / 100),
+  );
+
+  currentMonthlyTarget = 0;
+  const headerTitle = document.querySelector("#dashboard .sales-target-header h3");
+  const headerNote = document.querySelector("#dashboard .sales-target-header p");
+  const targetButton = document.querySelector("#dashboard .sales-target-header .target-set-btn");
+  if (headerTitle) headerTitle.textContent = "Sales Commission";
+  if (headerNote) headerNote.textContent = "Flat commission on closed sales. No monthly target or target incentive.";
+  if (targetButton) {
+    targetButton.title = "Commission is fixed at 10%";
+    targetButton.innerHTML = '<i class="fas fa-percent"></i> Fixed 10%';
+  }
+  setSalesTargetMetricLabel(`${prefix}TargetSet`, "Commission Rate");
+  setSalesTargetMetricLabel(`${prefix}TargetAchieved`, "Sales Closed");
+  setSalesTargetMetricLabel(`${prefix}TargetRemaining`, "Commission");
+  setSalesTargetText(`${prefix}TargetSet`, `${commissionPercent.toFixed(0)}%`);
+  setSalesTargetText(`${prefix}TargetSetHint`, "Flat on closed sales");
+  setSalesTargetText(`${prefix}TargetAchieved`, formatSalesTargetMoney(achieved));
+  setSalesTargetText(`${prefix}TargetRemaining`, formatSalesTargetMoney(commissionAmount));
+  setSalesTargetText(`${prefix}TargetAchievedHint`, "No monthly target");
+  setSalesTargetText(`${prefix}TargetRemainingHint`, "Auto-calculated commission");
+
+  if (prefix === "me") {
+    setSalesTargetText("meTargetProgressLabel", `${commissionPercent.toFixed(0)}% commission`);
+    setSalesTargetMetricLabel("meTargetInsightAchieved", "Sales Closed");
+    setSalesTargetMetricLabel("meTargetInsightRemaining", "Commission");
+    updateMeTargetProgressInsights(0, achieved, 0);
+    setSalesTargetText("meTargetHeroValue", `${formatSalesTargetMoney(commissionAmount)} commission`);
+    setSalesTargetText(
+      "meTargetHeroText",
+      achieved > 0
+        ? `${formatSalesTargetMoney(achieved)} closed sales par ${commissionPercent.toFixed(0)}% commission.`
+        : "Commission profile par monthly target nahi hai. Closed sales par flat 10% commission milega.",
+    );
+    setSalesTargetText("meTargetInsightAchieved", formatSalesTargetMoney(achieved));
+    setSalesTargetText("meTargetInsightAchievedHint", "Commissionable sales");
+    setSalesTargetText("meTargetInsightRemaining", formatSalesTargetMoney(commissionAmount));
+    setSalesTargetText("meTargetInsightRemainingHint", "Estimated payout");
+    renderMeTargetProgressChart(achieved || 1, commissionAmount, {
+      centerValueText: `${commissionPercent.toFixed(0)}%`,
+      centerSubtext: "commission",
+      labels: ["Commission", "Sales Balance"],
+      data: achieved > 0
+        ? [Math.max(commissionAmount, 0), Math.max(achieved - commissionAmount, 0)]
+        : [0, 1],
+    });
+  }
+}
+
 function applySalesTargetSummary(prefix, data = {}) {
+  if (isCommissionSalesSummary(data)) {
+    applyMeCommissionSummary(prefix, data);
+    return;
+  }
+
   const targetValue = Number(data.target ?? MONTHLY_TARGET);
   const target = Number.isFinite(targetValue) ? targetValue : MONTHLY_TARGET;
   const achieved = Number(data.achieved || 0);
@@ -727,6 +807,20 @@ function applySalesTargetSummary(prefix, data = {}) {
   const achievedPercent =
     target > 0 ? Math.min((achieved / target) * 100, 100).toFixed(1) : "0.0";
 
+  setSalesTargetMetricLabel(`${prefix}TargetSet`, "Target Set");
+  setSalesTargetMetricLabel(`${prefix}TargetAchieved`, "Target Achieved");
+  setSalesTargetMetricLabel(`${prefix}TargetRemaining`, "Remaining Target");
+  setSalesTargetMetricLabel("meTargetInsightAchieved", "Achieved");
+  setSalesTargetMetricLabel("meTargetInsightRemaining", "Remaining");
+  const headerTitle = document.querySelector("#dashboard .sales-target-header h3");
+  const headerNote = document.querySelector("#dashboard .sales-target-header p");
+  const targetButton = document.querySelector("#dashboard .sales-target-header .target-set-btn");
+  if (headerTitle) headerTitle.textContent = "Monthly Sales Target";
+  if (headerNote) headerNote.textContent = "Admin-assigned goal with live achieved vs remaining sales.";
+  if (targetButton) {
+    targetButton.title = "Monthly target is assigned by admin";
+    targetButton.innerHTML = '<i class="fas fa-shield-halved"></i> Assigned by Admin';
+  }
   setSalesTargetText(`${prefix}TargetSet`, formatSalesTargetMoney(target));
   setSalesTargetText(`${prefix}TargetSetHint`, "Current monthly goal");
 
@@ -777,12 +871,14 @@ function normalizeMeDashboardNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-function renderMeTargetProgressChart(target, achieved) {
+function renderMeTargetProgressChart(target, achieved, options = {}) {
   const remaining = Math.max(Number(target) - Number(achieved || 0), 0);
   const progressValue =
     Number(target) > 0
       ? Math.min((Number(achieved || 0) / Number(target)) * 100, 100)
       : 0;
+  const chartLabels = options.labels || ["Achieved", "Remaining"];
+  const chartData = options.data || [Number(achieved || 0), remaining];
 
   const canvas = document.getElementById("meTargetProgressChart");
   if (!canvas) return;
@@ -803,11 +899,11 @@ function renderMeTargetProgressChart(target, achieved) {
 
       chartCtx.fillStyle = "#0f172a";
       chartCtx.font = "700 28px 'Segoe UI', Arial, sans-serif";
-      chartCtx.fillText(`${progressValue.toFixed(1)}%`, arc.x, arc.y - 6);
+      chartCtx.fillText(options.centerValueText || `${progressValue.toFixed(1)}%`, arc.x, arc.y - 6);
 
       chartCtx.fillStyle = "#64748b";
       chartCtx.font = "600 12px 'Segoe UI', Arial, sans-serif";
-      chartCtx.fillText("achieved", arc.x, arc.y + 18);
+      chartCtx.fillText(options.centerSubtext || "achieved", arc.x, arc.y + 18);
       chartCtx.restore();
     },
   };
@@ -825,10 +921,10 @@ function renderMeTargetProgressChart(target, achieved) {
   meTargetProgressChart = new Chart(ctx, {
     type: "doughnut",
     data: {
-      labels: ["Achieved", "Remaining"],
+      labels: chartLabels,
       datasets: [
         {
-          data: [achieved, remaining],
+          data: chartData,
           backgroundColor: [achievedGradient, remainingGradient],
           borderColor: ["#ffffff", "#ffffff"],
           borderWidth: 4,
@@ -1094,11 +1190,13 @@ async function loadMeSalesTargetSummary(deals = []) {
 
   const targetSummary = await fetchMonthlyTargetSummary();
   const target = Number(targetSummary?.target ?? currentMonthlyTarget ?? MONTHLY_TARGET);
+  const isCommissionProfile = isCommissionSalesSummary(targetSummary);
 
   applySalesTargetSummary("me", {
+    ...targetSummary,
     target,
     achieved,
-    remaining: Math.max(target - achieved, 0),
+    remaining: isCommissionProfile ? 0 : Math.max(target - achieved, 0),
   });
 }
 
