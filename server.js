@@ -478,8 +478,10 @@ function getSalesTargetForRole(role) {
 }
 
 const AUTO_TARGET_INCENTIVE_RATE = 0.07;
+const SALARY_TARGET_MULTIPLIER = 7;
 const AUTO_TARGET_INCENTIVE_ROLES = new Set(["me", "tme"]);
 const SALES_COMMISSION_ROLES = new Set(["me", "tme"]);
+const DEFAULT_SALES_COMMISSION_PERCENT = 10;
 let cachedProfileInviteTransport = null;
 let cachedProfileInviteTransportSignature = "";
 let userRegistrationColumnsReady = false;
@@ -511,6 +513,24 @@ async function resolveSalesTargetRole(role, userId) {
   return String(rows[0]?.role || "")
     .toLowerCase()
     .trim();
+}
+
+function getAutoSalaryTargetForUser(user) {
+  const role = normalizeRoleValue(user?.role);
+  const compensationType = normalizeCompensationType(user?.compensation_type);
+
+  if (!AUTO_TARGET_INCENTIVE_ROLES.has(role) || compensationType !== "salary") {
+    return null;
+  }
+
+  const salary = normalizePayrollAmount(user?.salary);
+
+  return {
+    target: Number((salary * SALARY_TARGET_MULTIPLIER).toFixed(2)),
+    salary,
+    multiplier: SALARY_TARGET_MULTIPLIER,
+    source: "salary_7x",
+  };
 }
 
 async function getSalesTargetSummaryData({ role, userId, monthKey } = {}) {
@@ -554,16 +574,46 @@ async function getSalesTargetSummaryData({ role, userId, monthKey } = {}) {
   const [rows] = await dbPromise.query(sql, params);
   const achieved = Number(rows[0]?.achieved || 0);
   let target = getSalesTargetForRole(effectiveRole);
+  let targetSource = "role_default";
+  let targetBasis = null;
+  let compensationType = "salary";
 
   if (normalizedUserId) {
     const [userRows] = await dbPromise.query(
-      "SELECT monthly_target FROM users WHERE id = ? LIMIT 1",
+      "SELECT role, salary, compensation_type, monthly_target, commission_percent FROM users WHERE id = ? LIMIT 1",
       [normalizedUserId],
     );
-    const customTarget = Number(userRows[0]?.monthly_target);
+    const user = userRows[0] || {};
+    const userRole = normalizeRoleValue(user.role || effectiveRole);
+    compensationType = normalizeCompensationType(user.compensation_type);
+    const salaryTarget = getAutoSalaryTargetForUser({
+      ...user,
+      role: userRole,
+      compensation_type: compensationType,
+    });
 
-    if (Number.isFinite(customTarget) && customTarget >= 0) {
-      target = customTarget;
+    if (salaryTarget) {
+      target = salaryTarget.target;
+      targetSource = salaryTarget.source;
+      targetBasis = {
+        salary: salaryTarget.salary,
+        multiplier: salaryTarget.multiplier,
+      };
+    } else if (
+      AUTO_TARGET_INCENTIVE_ROLES.has(userRole) &&
+      compensationType === "commission"
+    ) {
+      target = 0;
+      targetSource = "commission";
+      targetBasis = {
+        commissionPercent: getFixedSalesCommissionPercent(compensationType),
+      };
+    } else {
+      const customTarget = Number(user.monthly_target);
+      if (Number.isFinite(customTarget) && customTarget >= 0) {
+        target = customTarget;
+        targetSource = "manual";
+      }
     }
   }
 
@@ -574,6 +624,16 @@ async function getSalesTargetSummaryData({ role, userId, monthKey } = {}) {
     startDate: monthRange.startDate,
     endDate: monthRange.endDate,
     target,
+    targetSource,
+    targetBasis,
+    compensationType,
+    isCommissionProfile: compensationType === "commission",
+    commissionPercent: getFixedSalesCommissionPercent(compensationType),
+    commissionAmount: compensationType === "commission"
+      ? Number(((achieved * DEFAULT_SALES_COMMISSION_PERCENT) / 100).toFixed(2))
+      : 0,
+    salaryTargetMultiplier: SALARY_TARGET_MULTIPLIER,
+    incentiveRate: AUTO_TARGET_INCENTIVE_RATE,
     achieved,
     remaining: Math.max(target - achieved, 0),
     dealsCount: Number(rows[0]?.dealsCount || 0),
@@ -590,6 +650,9 @@ async function getAdminTeamTargetSummary({ monthKey } = {}) {
         id,
         name,
         role,
+        salary,
+        compensation_type,
+        commission_percent,
         monthly_target
       FROM users
       WHERE LOWER(TRIM(COALESCE(role, ''))) IN ('me', 'tme')
@@ -620,7 +683,15 @@ async function getAdminTeamTargetSummary({ monthKey } = {}) {
         roleLabel: String(user.role || "")
           .toUpperCase()
           .trim() || "EMPLOYEE",
+        compensationType: summary.compensationType,
+        salary: normalizePayrollAmount(user.salary),
+        commissionPercent: summary.commissionPercent,
+        commissionAmount: summary.commissionAmount,
         target,
+        targetSource: summary.targetSource,
+        targetBasis: summary.targetBasis,
+        salaryTargetMultiplier: summary.salaryTargetMultiplier,
+        incentiveRate: summary.incentiveRate,
         achieved,
         remaining: Math.max(target - achieved, 0),
         dealsCount: Number(summary.dealsCount || 0),
@@ -657,6 +728,15 @@ async function getAdminTeamTargetSummary({ monthKey } = {}) {
   };
 }
 
+function sanitizeSalesTargetSummaryForEmployee(summary = {}) {
+  const safeSummary = { ...summary };
+
+  delete safeSummary.targetSource;
+  delete safeSummary.targetBasis;
+
+  return safeSummary;
+}
+
 async function getAutoTargetIncentiveForPayroll({ user, monthKey, basicSalary }) {
   const role = String(user?.role || "")
     .toLowerCase()
@@ -670,6 +750,8 @@ async function getAutoTargetIncentiveForPayroll({ user, monthKey, basicSalary })
       achieved: 0,
       remaining: 0,
       rate: AUTO_TARGET_INCENTIVE_RATE,
+      source: "none",
+      basis: null,
     };
   }
 
@@ -691,6 +773,8 @@ async function getAutoTargetIncentiveForPayroll({ user, monthKey, basicSalary })
     achieved,
     remaining: Math.max(target - achieved, 0),
     rate: AUTO_TARGET_INCENTIVE_RATE,
+    source: targetSummary.targetSource,
+    basis: targetSummary.targetBasis,
   };
 }
 
@@ -699,7 +783,7 @@ async function getSalesCommissionForPayroll({ user, monthKey } = {}) {
   const role = String(user?.role || "")
     .toLowerCase()
     .trim();
-  const commissionPercent = normalizeCommissionPercent(user?.commission_percent);
+  const commissionPercent = getFixedSalesCommissionPercent(compensationType);
 
   if (
     compensationType !== "commission" ||
@@ -1103,6 +1187,12 @@ function normalizeCompensationType(value) {
 function normalizeCommissionPercent(value) {
   const percent = Number(String(value ?? "").replace(/,/g, "").trim());
   return Number.isFinite(percent) ? Number(percent.toFixed(2)) : 0;
+}
+
+function getFixedSalesCommissionPercent(compensationType) {
+  return normalizeCompensationType(compensationType) === "commission"
+    ? DEFAULT_SALES_COMMISSION_PERCENT
+    : 0;
 }
 
 function normalizeAppBaseUrl(value) {
@@ -3759,6 +3849,7 @@ async function buildLeadWhatsappPayload(lead, mode = "create") {
   pushWhatsappLine(lines, "Alternate Contact", lead.alt_contact || lead.alternate_contact);
   pushWhatsappLine(lines, "Telephone", lead.telephone);
   pushWhatsappLine(lines, "Email", lead.email);
+  pushWhatsappLine(lines, "Sales Type", normalizeLeadSalesType(lead.sales_type));
   pushWhatsappLine(lines, "Source", lead.source_lead);
   pushWhatsappLine(lines, "Industry", lead.industry_type);
   pushWhatsappLine(lines, "Address", address);
@@ -4832,6 +4923,13 @@ function normalizeAppointmentStatus(value, fallback = "generated") {
   return fallback;
 }
 
+function normalizeLeadSalesType(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+  return normalized === "renewal" ? "renewal" : "new";
+}
+
 function getAppointmentStageSql() {
   return `
     CASE
@@ -4867,6 +4965,23 @@ async function ensureLeadAppointmentStatusColumn() {
 
 ensureLeadAppointmentStatusColumn().catch((err) => {
   console.error("Appointment status schema setup failed:", err);
+});
+
+async function ensureLeadSalesTypeColumn() {
+  await runSchemaChange(
+    "ALTER TABLE leads ADD COLUMN sales_type varchar(20) NOT NULL DEFAULT 'new' AFTER source_lead",
+    "ER_DUP_FIELDNAME",
+  );
+
+  await dbPromise.query(`
+    UPDATE leads
+    SET sales_type = 'new'
+    WHERE sales_type IS NULL OR TRIM(sales_type) = ''
+  `);
+}
+
+ensureLeadSalesTypeColumn().catch((err) => {
+  console.error("Lead sales type schema setup failed:", err);
 });
 
 async function ensureUserMonthlyTargetColumn() {
@@ -7199,7 +7314,7 @@ app.post("/register", (req, res) => {
     const compensationType = SALES_COMMISSION_ROLES.has(role)
       ? requestedCompensationType
       : "salary";
-    const commissionPercent = normalizeCommissionPercent(req.body.commission_percent);
+    const commissionPercent = getFixedSalesCommissionPercent(compensationType);
     const storedSalary = compensationType === "commission" ? 0 : salary;
     const joiningDate = normalizeDateOnlyValue(req.body.joining_date) || null;
     const totalExperience = String(req.body.total_experience || "").trim() || null;
@@ -8636,7 +8751,6 @@ app.put("/api/admin/users/:id", (req, res) => {
     const rawSalary = String(req.body.salary ?? "").trim();
     const salary = normalizePayrollAmount(rawSalary);
     const requestedCompensationType = normalizeCompensationType(req.body.compensation_type);
-    const commissionPercent = normalizeCommissionPercent(req.body.commission_percent);
     const joiningDate = normalizeDateOnlyValue(req.body.joining_date) || null;
     const totalExperience = String(req.body.total_experience || "").trim() || null;
     const pfEnabled =
@@ -8830,11 +8944,7 @@ app.put("/api/admin/users/:id", (req, res) => {
       if (!SALES_COMMISSION_ROLES.has(nextRole)) {
         nextCompensationType = "salary";
       }
-      const nextCommissionPercent = nextCompensationType === "commission"
-        ? hasBodyField(req.body, "commission_percent")
-          ? commissionPercent
-          : normalizeCommissionPercent(existingUser.commission_percent)
-        : 0;
+      const nextCommissionPercent = getFixedSalesCommissionPercent(nextCompensationType);
       const nextStoredSalary = nextCompensationType === "commission" ? 0 : nextSalary;
       const nextJoiningDate = hasBodyField(req.body, "joining_date")
         ? joiningDate
@@ -9157,6 +9267,7 @@ app.get("/api/me/:id", async (req, res) => {
 // ====================== ADD LEAD ======================
 app.post("/api/leads", async (req, res) => {
   const data = req.body || {};
+  const salesType = normalizeLeadSalesType(data.sales_type);
   const hasAppointmentDate = Boolean(data.app_date);
   const appointmentStatus = hasAppointmentDate
     ? normalizeAppointmentStatus(data.appointment_status, "generated")
@@ -9167,7 +9278,7 @@ app.post("/api/leads", async (req, res) => {
         company_name, client_name, contact, alternate_contact,
         telephone, email, gst_no,
         flat_no, building_name, locality, city, pincode, state, maps_lnk,
-        source_lead, industry_type,
+        source_lead, sales_type, industry_type,
         web_type, seo_type, smo_type, app_type, erp_type, services,
         service_notes,
         action_type, appointment_status,
@@ -9175,7 +9286,7 @@ app.post("/api/leads", async (req, res) => {
         follow_date, follow_time, reason,
         additional_notes,
         created_by 
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
   const values = [
@@ -9194,6 +9305,7 @@ app.post("/api/leads", async (req, res) => {
     data.state || null,
     data.maps_lnk || null,
     data.source_lead || null,
+    salesType,
     data.industry_type || null,
     JSON.stringify(data.web_type || []),
     JSON.stringify(data.seo_type || []),
@@ -9218,6 +9330,7 @@ app.post("/api/leads", async (req, res) => {
 
   try {
     await ensureLeadAppointmentStatusColumn();
+    await ensureLeadSalesTypeColumn();
     const [result] = await dbPromise.query(sql, values);
     const whatsapp = data.notify_whatsapp
       ? await buildLeadWhatsappPayload(data, "create")
@@ -9361,9 +9474,14 @@ app.put("/api/leads/:id", async (req, res) => {
 
   try {
     await ensureLeadAppointmentStatusColumn();
+    await ensureLeadSalesTypeColumn();
 
     if (mode === "full") {
       const actionType = data.action_type || data.actionType || "appointment";
+      const hasSalesTypeField = Object.prototype.hasOwnProperty.call(data, "sales_type");
+      const salesType = hasSalesTypeField
+        ? normalizeLeadSalesType(data.sales_type)
+        : null;
       const isFollowup = actionType === "followup";
       const appointmentDate = isFollowup ? null : data.app_date || null;
       const appointmentTime = isFollowup ? null : data.app_time || null;
@@ -9394,6 +9512,7 @@ app.put("/api/leads/:id", async (req, res) => {
             state = ?,
             maps_lnk = ?,
             source_lead = ?,
+            sales_type = COALESCE(?, sales_type),
             industry_type = ?,
             web_type = ?,
             seo_type = ?,
@@ -9432,6 +9551,7 @@ app.put("/api/leads/:id", async (req, res) => {
         data.state || null,
         data.maps_lnk || null,
         data.source_lead || null,
+        salesType,
         data.industry_type || null,
         JSON.stringify(data.web_type || []),
         JSON.stringify(data.seo_type || []),
@@ -9468,6 +9588,7 @@ app.put("/api/leads/:id", async (req, res) => {
             {
               ...data,
               action_type: actionType,
+              ...(hasSalesTypeField ? { sales_type: salesType } : {}),
               app_date: appointmentDate,
               app_time: appointmentTime,
               assign_emp: assignedEmployee,
@@ -10333,6 +10454,7 @@ app.put("/api/downsale-requests/:id", async (req, res) => {
 
 app.get("/api/sales-target-summary", async (req, res) => {
   try {
+    const requesterRole = normalizeRoleValue(req.query.role);
     const summary = await getSalesTargetSummaryData({
       role: req.query.role,
       userId: req.query.userId,
@@ -10341,7 +10463,9 @@ app.get("/api/sales-target-summary", async (req, res) => {
 
     res.json({
       success: true,
-      data: summary,
+      data: requesterRole === "admin"
+        ? summary
+        : sanitizeSalesTargetSummaryForEmployee(summary),
     });
   } catch (err) {
     console.error("Sales Target Summary Error:", err);
@@ -10406,6 +10530,25 @@ app.put("/api/users/:id/monthly-target", async (req, res) => {
     await ensureUserMonthlyTargetColumn();
     if (actorId && actorId !== userId) {
       await ensureAdminAccess(actorId);
+    }
+
+    const [users] = await dbPromise.query(
+      "SELECT compensation_type FROM users WHERE id = ? LIMIT 1",
+      [userId],
+    );
+
+    if (!users.length) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (normalizeCompensationType(users[0].compensation_type) === "commission") {
+      return res.status(400).json({
+        success: false,
+        message: "Commission profiles do not use monthly targets",
+      });
     }
 
     const [result] = await dbPromise.query(
@@ -13137,12 +13280,13 @@ async function getPayrollEmployeeProfile(userId) {
   if (!rows.length) return null;
 
   const employee = rows[0];
+  const compensationType = normalizeCompensationType(employee.compensation_type);
   return {
     ...employee,
     department: derivePayrollDepartment(employee),
     salary: normalizePayrollAmount(employee.salary),
-    compensation_type: normalizeCompensationType(employee.compensation_type),
-    commission_percent: normalizeCommissionPercent(employee.commission_percent),
+    compensation_type: compensationType,
+    commission_percent: getFixedSalesCommissionPercent(compensationType),
     is_team_lead: Number(employee.is_team_lead || 0),
   };
 }
@@ -13232,14 +13376,17 @@ async function getPayrollUsers(filters = {}) {
     params,
   );
 
-  return rows.map((row) => ({
-    ...row,
-    department: derivePayrollDepartment(row),
-    salary: normalizePayrollAmount(row.salary),
-    compensation_type: normalizeCompensationType(row.compensation_type),
-    commission_percent: normalizeCommissionPercent(row.commission_percent),
-    is_team_lead: Number(row.is_team_lead || 0),
-  }));
+  return rows.map((row) => {
+    const compensationType = normalizeCompensationType(row.compensation_type);
+    return {
+      ...row,
+      department: derivePayrollDepartment(row),
+      salary: normalizePayrollAmount(row.salary),
+      compensation_type: compensationType,
+      commission_percent: getFixedSalesCommissionPercent(compensationType),
+      is_team_lead: Number(row.is_team_lead || 0),
+    };
+  });
 }
 
 function normalizeStoredPayrollRow(row) {
@@ -13574,10 +13721,7 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
   const compensationType = SALES_COMMISSION_ROLES.has(role)
     ? requestedCompensationType
     : "salary";
-  const commissionPercent =
-    options.commissionPercent !== undefined
-      ? normalizeCommissionPercent(options.commissionPercent)
-      : normalizeCommissionPercent(user?.commission_percent);
+  const commissionPercent = getFixedSalesCommissionPercent(compensationType);
   const configuredSalary =
     compensationType === "commission"
       ? 0
@@ -13647,15 +13791,14 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
           : 0,
       }
     : liveSalesCommission;
-  const autoTargetIncentive = shouldUseStoredSnapshot
-    ? null
-    : compensationType === "salary" && AUTO_TARGET_INCENTIVE_ROLES.has(
-        String(user?.role || "")
-          .toLowerCase()
-          .trim(),
-      )
+  const autoTargetIncentive =
+    compensationType === "salary" && AUTO_TARGET_INCENTIVE_ROLES.has(role)
       ? await getAutoTargetIncentiveForPayroll({
-          user,
+          user: {
+            ...user,
+            salary: configuredSalary,
+            compensation_type: compensationType,
+          },
           monthKey: monthRange.monthKey,
           basicSalary,
         })
@@ -13684,6 +13827,14 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
       commissionSalesAmount: salesCommission.salesAmount,
       commissionDealsCount: salesCommission.dealsCount,
       commissionAmount: salesCommission.amount,
+      target: autoTargetIncentive?.target || 0,
+      targetAchieved: autoTargetIncentive?.achieved || 0,
+      targetRemaining: autoTargetIncentive?.remaining || 0,
+      targetIncentiveRate: autoTargetIncentive?.rate || AUTO_TARGET_INCENTIVE_RATE,
+      targetIncentiveAmount: autoTargetIncentive?.amount || 0,
+      targetIncentiveApplies: Boolean(autoTargetIncentive?.applies),
+      targetSource: autoTargetIncentive?.source || "",
+      targetBasis: autoTargetIncentive?.basis || null,
       salary: configuredSalary,
       joiningDate,
       isTeamLead,
@@ -13800,6 +13951,14 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     commissionSalesAmount: salesCommission.salesAmount,
     commissionDealsCount: salesCommission.dealsCount,
     commissionAmount: salesCommission.amount,
+    target: autoTargetIncentive?.target || 0,
+    targetAchieved: autoTargetIncentive?.achieved || 0,
+    targetRemaining: autoTargetIncentive?.remaining || 0,
+    targetIncentiveRate: autoTargetIncentive?.rate || AUTO_TARGET_INCENTIVE_RATE,
+    targetIncentiveAmount: autoTargetIncentive?.amount || 0,
+    targetIncentiveApplies: Boolean(autoTargetIncentive?.applies),
+    targetSource: autoTargetIncentive?.source || "",
+    targetBasis: autoTargetIncentive?.basis || null,
     salary: basicSalary,
     joiningDate,
     isTeamLead,
@@ -13828,6 +13987,12 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     approvedAt: storedPayroll?.approvedAt || null,
     isGenerated: Boolean(storedPayroll?.payrollId),
   };
+}
+
+function sanitizePayrollPreviewForEmployee(preview = {}) {
+  const safePreview = { ...preview };
+
+  return safePreview;
 }
 
 async function getPayrollTrendSeries(limit = 6) {
@@ -13935,7 +14100,7 @@ async function replacePayrollLineItems(payrollId, preview) {
 
   if (preview.incentiveAmount > 0) {
     const incentiveLabel = preview.compensationType === "commission"
-      ? `Sales commission (${Number(preview.commissionPercent || 0)}%)`
+      ? `Sales commission (${DEFAULT_SALES_COMMISSION_PERCENT}%)`
       : AUTO_TARGET_INCENTIVE_ROLES.has(
       String(preview.role || "")
         .toLowerCase()
@@ -13989,11 +14154,7 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
     updates.compensationType !== undefined || updates.compensation_type !== undefined
       ? normalizeCompensationType(updates.compensationType ?? updates.compensation_type)
       : normalizeCompensationType(employee.compensation_type);
-  const nextCommissionPercent = nextCompensationType === "commission"
-    ? updates.commissionPercent !== undefined || updates.commission_percent !== undefined
-      ? normalizeCommissionPercent(updates.commissionPercent ?? updates.commission_percent)
-      : normalizeCommissionPercent(employee.commission_percent)
-    : 0;
+  const nextCommissionPercent = getFixedSalesCommissionPercent(nextCompensationType);
   const nextStoredSalary = nextCompensationType === "commission" ? 0 : nextSalary;
 
   if (nextStoredSalary < 0) {
@@ -14543,7 +14704,7 @@ app.get("/api/payroll/my/:userId", async (req, res) => {
         joiningDate: employee.joining_date || null,
         isTeamLead: Number(employee.is_team_lead || 0),
       },
-      preview,
+      preview: sanitizePayrollPreviewForEmployee(preview),
       history: historyRows.map(normalizeStoredPayrollRow),
     });
   } catch (err) {
