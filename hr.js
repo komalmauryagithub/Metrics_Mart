@@ -2,7 +2,7 @@ const BASE_URL =
   window.location.protocol === "file:" ||
   ["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://localhost:3000"
-    : window.location.origin || "https://metrics-mart.onrender.com";
+    : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
 
 if (window.location.protocol === "file:") {
   window.location.replace(`${BASE_URL}/hr.html`);
@@ -32,6 +32,7 @@ const HR_ROLE_LABELS = {
   accounts: "Accounts",
   dm: "DM",
 };
+const HR_SALES_COMPENSATION_ROLES = new Set(["tme", "me"]);
 
 const HR_ROLE_TARGETS = [
   { role: "hr", label: "HR Executive", target: 2, department: "People Ops" },
@@ -157,11 +158,16 @@ function setupUserRegistration() {
   const modal = document.getElementById("hrUserRegistrationModal");
   const form = document.getElementById("hrRegisterForm");
   const captureFaceBtn = document.getElementById("hrAttendanceFaceCaptureBtn");
+  const roleField = form?.elements?.role;
+  const compensationType = form?.elements?.compensation_type;
 
   createUserBtn?.addEventListener("click", openHrUserForm);
   closeModalBtn?.addEventListener("click", closeHrUserForm);
   form?.addEventListener("submit", submitHrUserRegistration);
   captureFaceBtn?.addEventListener("click", captureHrAttendanceFaceEnrollment);
+  roleField?.addEventListener("change", toggleHrUserCompensationFields);
+  compensationType?.addEventListener("change", toggleHrUserCompensationFields);
+  toggleHrUserCompensationFields();
 
   modal?.addEventListener("click", (event) => {
     if (event.target === modal) {
@@ -176,6 +182,40 @@ function setupUserRegistration() {
       closeHrUserForm();
     }
   });
+}
+
+function toggleHrUserCompensationFields() {
+  const form = document.getElementById("hrRegisterForm");
+  const role = String(form?.elements?.role?.value || "").toLowerCase().trim();
+  const typeField = form?.elements?.compensation_type;
+  const typeGroup = document.getElementById("hrUserCompensationTypeGroup");
+  const salaryGroup = document.getElementById("hrUserSalaryGroup");
+  const commissionGroup = document.getElementById("hrUserCommissionGroup");
+  const salaryField = form?.elements?.salary;
+  const commissionField = form?.elements?.commission_percent;
+  const canUseCommission = HR_SALES_COMPENSATION_ROLES.has(role);
+  const isCommission =
+    canUseCommission &&
+    String(typeField?.value || "salary").toLowerCase() === "commission";
+
+  typeGroup?.classList.toggle("hidden", !canUseCommission);
+  if (typeField) {
+    typeField.disabled = !canUseCommission;
+    typeField.required = canUseCommission;
+    if (!canUseCommission) typeField.value = "salary";
+  }
+
+  salaryGroup?.classList.toggle("hidden", isCommission);
+  commissionGroup?.classList.toggle("hidden", !isCommission);
+
+  if (salaryField) {
+    salaryField.required = !isCommission;
+    if (isCommission) salaryField.value = "0";
+  }
+  if (commissionField) {
+    commissionField.required = isCommission;
+    if (!isCommission) commissionField.value = "";
+  }
 }
 
 function setupHrEmployeeProfileModal() {
@@ -2937,6 +2977,7 @@ function resetHrUserForm() {
     joiningField.value = getTodayKey();
   }
 
+  toggleHrUserCompensationFields();
   clearHrAttendanceFaceCapture();
 }
 
@@ -2978,10 +3019,32 @@ async function submitHrUserRegistration(event) {
   const formData = new FormData(form);
   const password = String(formData.get("spswd") || "");
   const confirmPassword = String(formData.get("cpswd") || "");
+  const role = String(formData.get("role") || "").toLowerCase().trim();
+  const canUseSalesCompensation = HR_SALES_COMPENSATION_ROLES.has(role);
+  const compensationType = canUseSalesCompensation
+    ? String(formData.get("compensation_type") || "salary").toLowerCase()
+    : "salary";
 
   if (password !== confirmPassword) {
     showToast("Password and confirm password must match.", true);
     return;
+  }
+
+  formData.set("compensation_type", compensationType);
+
+  if (compensationType === "commission") {
+    const percent = Number(formData.get("commission_percent") || 0);
+    if (!canUseSalesCompensation) {
+      showToast("Commission payout sirf ME/TME role ke liye hai.", true);
+      return;
+    }
+    if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+      showToast("Commission percent 0 se 100 ke beech hona chahiye.", true);
+      return;
+    }
+    formData.set("salary", "0");
+  } else {
+    formData.set("commission_percent", "0");
   }
 
   if (currentUser?.id) {
