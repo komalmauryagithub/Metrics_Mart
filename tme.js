@@ -8,6 +8,7 @@ let popupTimer = null;
 let attendanceUpdating = false;
 let attendanceCalendarVisible = false;
 const MONTHLY_TARGET = 200000;
+const FIXED_SALES_COMMISSION_PERCENT = 10;
 let currentMonthlyTarget = MONTHLY_TARGET;
 let dealCloseLeadId = null;
 let dealCloseSubmitting = false;
@@ -999,6 +1000,12 @@ function setDashboardText(id, value) {
   if (element) element.textContent = value;
 }
 
+function setDashboardMetricLabel(valueId, label) {
+  const valueElement = document.getElementById(valueId);
+  const labelElement = valueElement?.parentElement?.querySelector("span");
+  if (labelElement) labelElement.textContent = label;
+}
+
 function formatDashboardMoney(value) {
   const amount = Number(value || 0);
   return `Rs. ${amount.toLocaleString("en-IN", {
@@ -1104,7 +1111,12 @@ function summarizeDealMix(deals = []) {
     (summary, deal) => {
       const amount = normalizeDashboardNumber(deal?.deal_amount);
       const key = getDealIdentityKey(deal);
-      const isRenewal = seenClients.has(key);
+      const explicitSalesType = String(deal?.sales_type || deal?.salesType || "")
+        .toLowerCase()
+        .trim();
+      const isRenewal =
+        explicitSalesType === "renewal" ||
+        (!explicitSalesType && seenClients.has(key));
 
       if (isRenewal) {
         summary.renewalCount += 1;
@@ -1282,7 +1294,75 @@ function updateTmeTargetProgressInsights(target, achieved, remaining) {
   );
 }
 
+function isCommissionSalesSummary(data = {}) {
+  return (
+    data.isCommissionProfile === true ||
+    String(data.compensationType || "").toLowerCase() === "commission"
+  );
+}
+
+function applyTmeCommissionSummary(prefix, data = {}) {
+  const achieved = Number(data.achieved || 0);
+  const commissionPercent = Number(
+    data.commissionPercent || FIXED_SALES_COMMISSION_PERCENT,
+  );
+  const commissionAmount = Number(
+    data.commissionAmount ?? ((achieved * commissionPercent) / 100),
+  );
+
+  currentMonthlyTarget = 0;
+  const headerTitle = document.querySelector("#dashboard .sales-target-header h3");
+  const headerNote = document.querySelector("#dashboard .sales-target-header p");
+  const targetButton = document.querySelector("#dashboard .sales-target-header .target-set-btn");
+  if (headerTitle) headerTitle.textContent = "Sales Commission";
+  if (headerNote) headerNote.textContent = "Flat commission on closed sales. No monthly target or target incentive.";
+  if (targetButton) {
+    targetButton.title = "Commission is fixed at 10%";
+    targetButton.innerHTML = '<i class="fas fa-percent"></i> Fixed 10%';
+  }
+  setDashboardMetricLabel(`${prefix}TargetSet`, "Commission Rate");
+  setDashboardMetricLabel(`${prefix}TargetAchieved`, "Sales Closed");
+  setDashboardMetricLabel(`${prefix}TargetRemaining`, "Commission");
+  setDashboardText(`${prefix}TargetSet`, `${commissionPercent.toFixed(0)}%`);
+  setDashboardText(`${prefix}TargetSetHint`, "Flat on closed sales");
+  setDashboardText(`${prefix}TargetAchieved`, formatDashboardMoney(achieved));
+  setDashboardText(`${prefix}TargetRemaining`, formatDashboardMoney(commissionAmount));
+  setDashboardText(`${prefix}TargetAchievedHint`, "No monthly target");
+  setDashboardText(`${prefix}TargetRemainingHint`, "Auto-calculated commission");
+
+  if (prefix === "tme") {
+    setDashboardText("tmeTargetProgressLabel", `${commissionPercent.toFixed(0)}% commission`);
+    setDashboardMetricLabel("tmeTargetInsightAchieved", "Sales Closed");
+    setDashboardMetricLabel("tmeTargetInsightRemaining", "Commission");
+    updateTmeTargetProgressInsights(0, achieved, 0);
+    setDashboardText("tmeTargetHeroValue", `${formatDashboardMoney(commissionAmount)} commission`);
+    setDashboardText(
+      "tmeTargetHeroText",
+      achieved > 0
+        ? `${formatDashboardMoney(achieved)} closed sales par ${commissionPercent.toFixed(0)}% commission.`
+        : "Commission profile par monthly target nahi hai. Closed sales par flat 10% commission milega.",
+    );
+    setDashboardText("tmeTargetInsightAchieved", formatDashboardMoney(achieved));
+    setDashboardText("tmeTargetInsightAchievedHint", "Commissionable sales");
+    setDashboardText("tmeTargetInsightRemaining", formatDashboardMoney(commissionAmount));
+    setDashboardText("tmeTargetInsightRemainingHint", "Estimated payout");
+    renderTargetProgressChart(achieved || 1, commissionAmount, {
+      centerValueText: `${commissionPercent.toFixed(0)}%`,
+      centerSubtext: "commission",
+      labels: ["Commission", "Sales Balance"],
+      data: achieved > 0
+        ? [Math.max(commissionAmount, 0), Math.max(achieved - commissionAmount, 0)]
+        : [0, 1],
+    });
+  }
+}
+
 function applySalesTargetSummary(prefix, data = {}) {
+  if (isCommissionSalesSummary(data)) {
+    applyTmeCommissionSummary(prefix, data);
+    return;
+  }
+
   const targetValue = Number(data.target ?? MONTHLY_TARGET);
   const target = Number.isFinite(targetValue) ? targetValue : MONTHLY_TARGET;
   const achieved = Number(data.achieved || 0);
@@ -1292,6 +1372,20 @@ function applySalesTargetSummary(prefix, data = {}) {
   const achievedPercent =
     target > 0 ? Math.min((achieved / target) * 100, 100).toFixed(1) : "0.0";
 
+  setDashboardMetricLabel(`${prefix}TargetSet`, "Target Set");
+  setDashboardMetricLabel(`${prefix}TargetAchieved`, "Target Achieved");
+  setDashboardMetricLabel(`${prefix}TargetRemaining`, "Remaining Target");
+  setDashboardMetricLabel("tmeTargetInsightAchieved", "Achieved");
+  setDashboardMetricLabel("tmeTargetInsightRemaining", "Remaining");
+  const headerTitle = document.querySelector("#dashboard .sales-target-header h3");
+  const headerNote = document.querySelector("#dashboard .sales-target-header p");
+  const targetButton = document.querySelector("#dashboard .sales-target-header .target-set-btn");
+  if (headerTitle) headerTitle.textContent = "Monthly Sales Target";
+  if (headerNote) headerNote.textContent = "Admin-assigned goal with live achieved vs remaining sales.";
+  if (targetButton) {
+    targetButton.title = "Monthly target is assigned by admin";
+    targetButton.innerHTML = '<i class="fas fa-shield-halved"></i> Assigned by Admin';
+  }
   setDashboardText(`${prefix}TargetSet`, formatDashboardMoney(target));
   setDashboardText(`${prefix}TargetSetHint`, "Current monthly goal");
 
@@ -1458,16 +1552,16 @@ async function loadTmeDashboard() {
     setDashboardText("funnelAppointments", appointments);
     setDashboardText("funnelFollowups", followups);
     setDashboardText("funnelDeals", dealsCount);
+    const targetData = targetResult?.data || targetResult || {};
     currentMonthlyTarget = normalizeDashboardNumber(
-      targetResult?.target ??
-        targetResult?.data?.target ??
-        currentMonthlyTarget ??
-        MONTHLY_TARGET,
+      targetData.target ?? currentMonthlyTarget ?? MONTHLY_TARGET,
     );
+    const isCommissionProfile = isCommissionSalesSummary(targetData);
     applySalesTargetSummary("tme", {
+      ...targetData,
       target: currentMonthlyTarget,
       achieved: totalSales,
-      remaining: Math.max(currentMonthlyTarget - totalSales, 0),
+      remaining: isCommissionProfile ? 0 : Math.max(currentMonthlyTarget - totalSales, 0),
     });
 
     renderAppointmentStatusSummary(appointmentSummary);
@@ -1482,7 +1576,7 @@ async function loadTmeDashboard() {
   }
 }
 
-function renderTargetProgressChart(target, achieved) {
+function renderTargetProgressChart(target, achieved, options = {}) {
   const canvas = document.getElementById("tmeTargetProgressChart");
   if (!canvas?.getContext) return;
 
@@ -1491,6 +1585,8 @@ function renderTargetProgressChart(target, achieved) {
   const remaining = Math.max(safeTarget - safeAchieved, 0);
   const progressValue =
     safeTarget > 0 ? Math.min((safeAchieved / safeTarget) * 100, 100) : 0;
+  const chartLabels = options.labels || ["Achieved", "Remaining"];
+  const chartData = options.data || [Math.max(safeAchieved, 0), remaining];
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
@@ -1507,11 +1603,11 @@ function renderTargetProgressChart(target, achieved) {
 
       chartCtx.fillStyle = "#0f172a";
       chartCtx.font = "700 28px 'Segoe UI', Arial, sans-serif";
-      chartCtx.fillText(`${progressValue.toFixed(1)}%`, arc.x, arc.y - 6);
+      chartCtx.fillText(options.centerValueText || `${progressValue.toFixed(1)}%`, arc.x, arc.y - 6);
 
       chartCtx.fillStyle = "#64748b";
       chartCtx.font = "600 12px 'Segoe UI', Arial, sans-serif";
-      chartCtx.fillText("achieved", arc.x, arc.y + 18);
+      chartCtx.fillText(options.centerSubtext || "achieved", arc.x, arc.y + 18);
       chartCtx.restore();
     },
   };
@@ -1531,10 +1627,10 @@ function renderTargetProgressChart(target, achieved) {
   targetProgressChart = new Chart(ctx, {
     type: "doughnut",
     data: {
-      labels: ["Achieved", "Remaining"],
+      labels: chartLabels,
       datasets: [
         {
-          data: [Math.max(safeAchieved, 0), remaining],
+          data: chartData,
           backgroundColor: [achievedGradient, remainingGradient],
           borderColor: ["#ffffff", "#ffffff"],
           borderWidth: 4,
@@ -2801,6 +2897,8 @@ function resetLeadFormState() {
     actionType.value = "appointment";
   }
 
+  setLeadFormValue("sales_type", "new");
+
   handleActionChange();
 }
 
@@ -2826,6 +2924,7 @@ async function populateLeadForm(lead) {
 
   setLeadFormValue("source_lead", lead.source_lead);
   setLeadFormValue("industry_type", lead.industry_type);
+  setLeadFormValue("sales_type", lead.sales_type || "new");
 
   setLeadFormCheckboxGroup("web_type[]", lead.web_type);
   setLeadFormCheckboxGroup("seo_type[]", lead.seo_type);
@@ -2978,6 +3077,7 @@ document
 
       source_lead: form.get("source_lead"),
       industry_type: form.get("industry_type"),
+      sales_type: form.get("sales_type") || "new",
 
       web_type: form.getAll("web_type[]"),
       seo_type: form.getAll("seo_type[]"),
@@ -3303,6 +3403,7 @@ async function handleLeadFormSubmit(event) {
     maps_lnk: form.get("maps_lnk"),
     source_lead: form.get("source_lead"),
     industry_type: form.get("industry_type"),
+    sales_type: form.get("sales_type") || "new",
     web_type: form.getAll("web_type[]"),
     seo_type: form.getAll("seo_type[]"),
     smo_type: form.getAll("smo_type[]"),
