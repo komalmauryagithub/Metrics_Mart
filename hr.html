@@ -13,7 +13,7 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
     />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script defer src="hr.js"></script>
+    <script defer src="hr.js?v=20260524-me-pay-type"></script>
     <script defer src="crm-security.js?v=20260523-shift-snipsafe"></script>
   </head>
   <body>
@@ -876,9 +876,27 @@
                         <option value="RedSea">RedSea</option>
                       </select>
                     </div>
-                    <div class="input-group">
+                    <div class="input-group hidden" id="hrUserCompensationTypeGroup">
+                      <label>Payment Type *</label>
+                      <select name="compensation_type" id="hrUserCompensationType">
+                        <option value="salary" selected>Salary</option>
+                        <option value="commission">Commission</option>
+                      </select>
+                    </div>
+                    <div class="input-group" id="hrUserSalaryGroup">
                       <label>Monthly Salary *</label>
                       <input type="number" name="salary" min="0" step="0.01" required />
+                    </div>
+                    <div class="input-group hidden" id="hrUserCommissionGroup">
+                      <label>Commission Percent *</label>
+                      <input
+                        type="number"
+                        name="commission_percent"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        placeholder="e.g. 5"
+                      />
                     </div>
                     <div class="input-group">
                       <label>Login Time *</label>
