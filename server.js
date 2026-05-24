@@ -479,6 +479,7 @@ function getSalesTargetForRole(role) {
 
 const AUTO_TARGET_INCENTIVE_RATE = 0.07;
 const AUTO_TARGET_INCENTIVE_ROLES = new Set(["me", "tme"]);
+const SALES_COMMISSION_ROLES = new Set(["me", "tme"]);
 let cachedProfileInviteTransport = null;
 let cachedProfileInviteTransportSignature = "";
 let userRegistrationColumnsReady = false;
@@ -702,7 +703,7 @@ async function getSalesCommissionForPayroll({ user, monthKey } = {}) {
 
   if (
     compensationType !== "commission" ||
-    role !== "tme" ||
+    !SALES_COMMISSION_ROLES.has(role) ||
     commissionPercent <= 0
   ) {
     return {
@@ -7195,7 +7196,9 @@ app.post("/register", (req, res) => {
     const rawSalary = String(req.body.salary ?? "").trim();
     const salary = normalizePayrollAmount(rawSalary);
     const requestedCompensationType = normalizeCompensationType(req.body.compensation_type);
-    const compensationType = role === "tme" ? requestedCompensationType : "salary";
+    const compensationType = SALES_COMMISSION_ROLES.has(role)
+      ? requestedCompensationType
+      : "salary";
     const commissionPercent = normalizeCommissionPercent(req.body.commission_percent);
     const storedSalary = compensationType === "commission" ? 0 : salary;
     const joiningDate = normalizeDateOnlyValue(req.body.joining_date) || null;
@@ -7240,10 +7243,10 @@ app.post("/register", (req, res) => {
     }
 
     if (compensationType === "commission") {
-      if (role !== "tme") {
+      if (!SALES_COMMISSION_ROLES.has(role)) {
         return res.status(400).json({
           success: false,
-          message: "Commission payout is available only for TME role",
+          message: "Commission payout is available only for ME/TME role",
         });
       }
 
@@ -8824,7 +8827,7 @@ app.put("/api/admin/users/:id", (req, res) => {
       let nextCompensationType = hasBodyField(req.body, "compensation_type")
         ? requestedCompensationType
         : normalizeCompensationType(existingUser.compensation_type);
-      if (nextRole !== "tme") {
+      if (!SALES_COMMISSION_ROLES.has(nextRole)) {
         nextCompensationType = "salary";
       }
       const nextCommissionPercent = nextCompensationType === "commission"
@@ -8901,10 +8904,10 @@ app.put("/api/admin/users/:id", (req, res) => {
       }
 
       if (nextCompensationType === "commission") {
-        if (nextRole !== "tme") {
+        if (!SALES_COMMISSION_ROLES.has(nextRole)) {
           return res.status(400).json({
             success: false,
-            message: "Commission payout is available only for TME role",
+            message: "Commission payout is available only for ME/TME role",
           });
         }
 
@@ -13568,7 +13571,9 @@ async function buildPayrollPreview(user, monthKey, options = {}) {
     options.compensationType !== undefined
       ? normalizeCompensationType(options.compensationType)
       : normalizeCompensationType(user?.compensation_type);
-  const compensationType = role === "tme" ? requestedCompensationType : "salary";
+  const compensationType = SALES_COMMISSION_ROLES.has(role)
+    ? requestedCompensationType
+    : "salary";
   const commissionPercent =
     options.commissionPercent !== undefined
       ? normalizeCommissionPercent(options.commissionPercent)
@@ -13999,8 +14004,8 @@ async function saveUserCompensation(adminId, userId, updates = {}) {
 
   if (nextCompensationType === "commission") {
     const role = normalizeRoleValue(employee.role);
-    if (role !== "tme") {
-      const error = new Error("Commission payout is available only for TME role");
+    if (!SALES_COMMISSION_ROLES.has(role)) {
+      const error = new Error("Commission payout is available only for ME/TME role");
       error.statusCode = 400;
       throw error;
     }
