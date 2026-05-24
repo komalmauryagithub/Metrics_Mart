@@ -11,6 +11,7 @@
     employeeChart: null,
     adminSearchTimer: null,
   };
+  const FIXED_SALES_COMMISSION_PERCENT = 10;
 
   function getCurrentUser() {
     try {
@@ -22,6 +23,10 @@
 
   function normalizeRole(role) {
     return String(role || "").trim().toLowerCase();
+  }
+
+  function canUseSalesCompensation(role) {
+    return ["me", "tme"].includes(normalizeRole(role));
   }
 
   function escapeHtml(value) {
@@ -192,7 +197,7 @@
                   <th>Employee</th>
                   <th>Role</th>
                   <th>Profile</th>
-                  <th>Basic Salary</th>
+                  <th>Pay Structure</th>
                   <th>Leave Summary</th>
                   <th>Adjustments</th>
                   <th>Final Salary</th>
@@ -349,6 +354,14 @@
         }
       }
     });
+
+    tableBody?.addEventListener("change", (event) => {
+      const field = event.target.closest('[data-field="compensation-type"]');
+      if (!field) return;
+
+      const row = field.closest("tr[data-employee-id]");
+      if (row) updateAdminCompensationRow(row);
+    });
   }
 
   function attachEmployeeEvents() {
@@ -380,6 +393,47 @@
           downloadPayslip(payrollId);
         }
       });
+  }
+
+  function updateAdminCompensationRow(row) {
+    const canUseCommission = canUseSalesCompensation(row?.dataset?.role);
+    const compensationType = String(
+      row?.querySelector('[data-field="compensation-type"]')?.value || "salary",
+    ).toLowerCase();
+    const isCommission = canUseCommission && compensationType === "commission";
+    const salaryInput = row?.querySelector('[data-field="salary"]');
+    const commissionInput = row?.querySelector('[data-field="commission-percent"]');
+    const incentiveInput = row?.querySelector('[data-field="incentive"]');
+
+    row?.querySelectorAll('[data-comp-section="salary"]').forEach((element) => {
+      element.classList.toggle("hidden", isCommission);
+    });
+    row?.querySelectorAll('[data-comp-section="commission"]').forEach((element) => {
+      element.classList.toggle("hidden", !isCommission);
+    });
+
+    if (salaryInput) {
+      salaryInput.disabled = isCommission;
+      if (isCommission) {
+        salaryInput.value = "0.00";
+      }
+    }
+
+    if (commissionInput) {
+      commissionInput.disabled = !isCommission;
+      commissionInput.readOnly = isCommission;
+      if (isCommission) {
+        commissionInput.value = FIXED_SALES_COMMISSION_PERCENT.toFixed(2);
+      }
+      if (!isCommission) {
+        commissionInput.value = "0.00";
+        commissionInput.readOnly = false;
+      }
+    }
+
+    if (incentiveInput) {
+      incentiveInput.readOnly = canUseCommission;
+    }
   }
 
   function buildAdminOverviewUrl() {
@@ -587,8 +641,20 @@
     tbody.innerHTML = rows
       .map((row) => {
         const normalizedRole = String(row.role || "").toLowerCase();
+        const canUseCommission = canUseSalesCompensation(normalizedRole);
+        const isCommission =
+          canUseCommission &&
+          String(row.compensationType || row.compensation_type || "salary").toLowerCase() === "commission";
         const hasAutoTargetIncentive =
-          normalizedRole === "me" || normalizedRole === "tme";
+          !isCommission && (normalizedRole === "me" || normalizedRole === "tme");
+        const hasLockedIncentive = hasAutoTargetIncentive || isCommission;
+        const salaryTarget = Number(row.target || 0);
+        const targetAchieved = Number(row.targetAchieved || 0);
+        const targetRemaining = Number(
+          row.targetRemaining ?? Math.max(salaryTarget - targetAchieved, 0),
+        );
+        const targetRate = Number(row.targetIncentiveRate || 0.07) * 100;
+        const commissionPercent = isCommission ? FIXED_SALES_COMMISSION_PERCENT : 0;
         const statusClass = row.isGenerated
           ? "payroll-pill"
           : row.leaveDeduction > 0
@@ -596,7 +662,7 @@
             : "payroll-pill";
 
         return `
-          <tr data-employee-id="${Number(row.employeeId)}">
+          <tr data-employee-id="${Number(row.employeeId)}" data-role="${escapeHtml(normalizedRole)}">
             <td>
               <div class="payroll-name-block">
                 <strong>${escapeHtml(row.name || "Employee")}</strong>
@@ -627,10 +693,28 @@
             <td>
               <div class="payroll-cell-stack">
                 <label>
-                  <span>Monthly Salary</span>
-                  <input class="payroll-inline-input" data-field="salary" type="number" min="0" step="0.01" value="${escapeHtml(Number(row.salary || 0).toFixed(2))}" />
+                  <span>Pay Type</span>
+                  <select class="payroll-inline-input" data-field="compensation-type" ${canUseCommission ? "" : "disabled"}>
+                    <option value="salary" ${isCommission ? "" : "selected"}>Salary</option>
+                    ${canUseCommission ? `<option value="commission" ${isCommission ? "selected" : ""}>Commission</option>` : ""}
+                  </select>
                 </label>
-                <small>${escapeHtml(formatCurrency(row.dailySalary || 0))} / day</small>
+                <label data-comp-section="salary" class="${isCommission ? "hidden" : ""}">
+                  <span>Monthly Salary</span>
+                  <input class="payroll-inline-input" data-field="salary" type="number" min="0" step="0.01" value="${escapeHtml(Number(row.salary || 0).toFixed(2))}" ${isCommission ? "disabled" : ""} />
+                </label>
+                ${canUseCommission ? `
+                <label data-comp-section="commission" class="${isCommission ? "" : "hidden"}">
+                  <span>Commission % (Fixed)</span>
+                  <input class="payroll-inline-input" data-field="commission-percent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(commissionPercent.toFixed(2))}" ${isCommission ? "readonly" : "disabled"} />
+                </label>
+                ` : ""}
+                ${isCommission
+                  ? `<small data-comp-section="commission">Sales ${escapeHtml(formatCurrency(row.commissionSalesAmount || 0))} | ${Number(row.commissionDealsCount || 0)} deal(s)</small>`
+                  : hasAutoTargetIncentive
+                    ? `<small data-comp-section="salary">Target ${escapeHtml(formatCurrency(salaryTarget))} (${escapeHtml(formatCurrency(row.salary || 0))} x 7)</small>
+                       <small data-comp-section="salary">Achieved ${escapeHtml(formatCurrency(targetAchieved))} | Remaining ${escapeHtml(formatCurrency(targetRemaining))}</small>`
+                    : `<small data-comp-section="salary">${escapeHtml(formatCurrency(row.dailySalary || 0))} / day</small>`}
               </div>
             </td>
             <td>
@@ -648,13 +732,15 @@
                   <input class="payroll-inline-input" data-field="bonus" type="number" min="0" step="0.01" value="${escapeHtml(Number(row.bonusAmount || 0).toFixed(2))}" />
                 </label>
                 <label>
-                  <span>Incentive</span>
-                  <input class="payroll-inline-input" data-field="incentive" type="number" min="0" step="0.01" value="${escapeHtml(Number(row.incentiveAmount || 0).toFixed(2))}" ${hasAutoTargetIncentive ? "readonly" : ""} />
+                  <span>${isCommission ? "Commission" : "Incentive"}</span>
+                  <input class="payroll-inline-input" data-field="incentive" type="number" min="0" step="0.01" value="${escapeHtml(Number(row.incentiveAmount || 0).toFixed(2))}" ${hasLockedIncentive ? "readonly" : ""} />
                 </label>
-                ${hasAutoTargetIncentive
+                ${isCommission
+                  ? `<small>Sales commission fixed at ${commissionPercent}% of closed sales.</small>`
+                  : hasAutoTargetIncentive
                   ? `<small>${row.incentiveAmount > 0
-                    ? "Auto 7% monthly target incentive applied."
-                    : "Auto 7% incentive unlocks after monthly target completion."}</small>`
+                    ? `Auto ${targetRate.toFixed(0)}% target incentive applied.`
+                    : `Auto ${targetRate.toFixed(0)}% incentive unlocks after monthly target completion.`}</small>`
                   : ""}
                 <label>
                   <span>Penalty</span>
@@ -704,6 +790,15 @@
       joiningDate: row.querySelector('[data-field="joining-date"]')?.value || "",
       isTeamLead: row.querySelector('[data-field="team-lead"]')?.checked || false,
       salary: row.querySelector('[data-field="salary"]')?.value || "0",
+      compensationType:
+        canUseSalesCompensation(row.dataset.role)
+          ? row.querySelector('[data-field="compensation-type"]')?.value || "salary"
+          : "salary",
+      commissionPercent:
+        canUseSalesCompensation(row.dataset.role) &&
+        row.querySelector('[data-field="compensation-type"]')?.value === "commission"
+          ? String(FIXED_SALES_COMMISSION_PERCENT)
+          : "0",
       bonusAmount: row.querySelector('[data-field="bonus"]')?.value || "0",
       incentiveAmount: row.querySelector('[data-field="incentive"]')?.value || "0",
       penaltyAmount: row.querySelector('[data-field="penalty"]')?.value || "0",
@@ -737,6 +832,8 @@
           body: JSON.stringify({
             adminId: user.id,
             salary: payload.salary,
+            compensationType: payload.compensationType,
+            commissionPercent: payload.commissionPercent,
             department: payload.department,
             joiningDate: payload.joiningDate,
             isTeamLead: payload.isTeamLead,
@@ -907,10 +1004,22 @@
     const container = document.getElementById("payrollMySummary");
     if (!container) return;
 
+    const isCommission =
+      String(preview.compensationType || "salary").toLowerCase() === "commission";
+    const commissionPercent = Number(
+      preview.commissionPercent || FIXED_SALES_COMMISSION_PERCENT,
+    );
+    const historyBonusHeader = document.querySelector(
+      ".payroll-history-table thead th:nth-child(4)",
+    );
+    if (historyBonusHeader) {
+      historyBonusHeader.textContent = isCommission ? "Bonus + Commission" : "Bonus + Incentive";
+    }
+
     container.innerHTML = `
       <article class="payroll-summary-tile">
-        <span>Basic Salary</span>
-        <strong>${escapeHtml(formatCurrency(preview.basicSalary || employee.salary || 0))}</strong>
+        <span>${isCommission ? "Commission Rate" : "Basic Salary"}</span>
+        <strong>${isCommission ? `${commissionPercent.toFixed(0)}%` : escapeHtml(formatCurrency(preview.basicSalary || employee.salary || 0))}</strong>
       </article>
       <article class="payroll-summary-tile">
         <span>Net Salary</span>
@@ -925,8 +1034,8 @@
         <strong>${Number(preview.halfDays || 0)}</strong>
       </article>
       <article class="payroll-summary-tile">
-        <span>Bonus + Incentive</span>
-        <strong>${escapeHtml(formatCurrency((preview.bonusAmount || 0) + (preview.incentiveAmount || 0)))}</strong>
+        <span>${isCommission ? "Sales Commission" : "Bonus + Incentive"}</span>
+        <strong>${escapeHtml(formatCurrency(isCommission ? (preview.commissionAmount || preview.incentiveAmount || 0) : ((preview.bonusAmount || 0) + (preview.incentiveAmount || 0))))}</strong>
       </article>
       <article class="payroll-summary-tile">
         <span>Status</span>
@@ -939,13 +1048,17 @@
     const container = document.getElementById("payrollMyBreakdown");
     if (!container) return;
 
+    const isCommission =
+      String(preview.compensationType || "salary").toLowerCase() === "commission";
+    const incentiveLabel = isCommission ? "Sales Commission" : "Incentive";
+
     container.innerHTML = `
       <ul class="payroll-inline-list">
         <li><span>Paid Leave Days</span><strong>${Number(preview.paidLeaveDays || 0)}</strong></li>
         <li><span>Unpaid Leave Days</span><strong>${Number(preview.unpaidLeaveDays || 0)}</strong></li>
         <li><span>Half Days</span><strong>${Number(preview.halfDays || 0)}</strong></li>
         <li><span>Bonus</span><strong>${escapeHtml(formatCurrency(preview.bonusAmount || 0))}</strong></li>
-        <li><span>Incentive</span><strong>${escapeHtml(formatCurrency(preview.incentiveAmount || 0))}</strong></li>
+        <li><span>${incentiveLabel}</span><strong>${escapeHtml(formatCurrency(isCommission ? (preview.commissionAmount || preview.incentiveAmount || 0) : (preview.incentiveAmount || 0)))}</strong></li>
         <li><span>Penalty</span><strong>${escapeHtml(formatCurrency(preview.penaltyAmount || 0))}</strong></li>
         <li><span>Daily Salary</span><strong>${escapeHtml(formatCurrency(preview.dailySalary || 0))}</strong></li>
       </ul>
