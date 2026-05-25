@@ -55,10 +55,10 @@
 
     window.fetch = function companyScopedFetch(input, init = {}) {
       const user = getCurrentUser();
-      const isRedSea = getCompanyKey(user) === "redsea";
+      const companyKey = getCompanyKey(user);
       const method = String(init?.method || "GET").toUpperCase();
 
-      if (!isRedSea || !["GET", "HEAD"].includes(method)) {
+      if (!companyKey || !["GET", "HEAD"].includes(method)) {
         return originalFetch(input, init);
       }
 
@@ -77,7 +77,7 @@
         return originalFetch(input, init);
       }
 
-      url.searchParams.set("companyScope", "redsea");
+      url.searchParams.set("companyScope", companyKey);
       const nextInput = rawUrl.startsWith("http")
         ? url.toString()
         : `${url.pathname}${url.search}${url.hash}`;
