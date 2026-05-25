@@ -16,6 +16,7 @@ let approvedDownsaleRequest = null;
 let appliedUpsaleAmount = 0;
 let downsaleApiAvailable = true;
 let downsalePollingTimer = null;
+let meRenewalAttribution = null;
 let currentProposalId = null;
 let proposalSubmitting = false;
 let currentProposalMeta = {};
@@ -29,6 +30,12 @@ const meDashboardState = {
     deals: 0,
   },
   deals: [],
+  salesMix: {
+    newSaleCount: 0,
+    renewalCount: 0,
+    newSaleAmount: 0,
+    renewalAmount: 0,
+  },
   attendanceToday: null,
 };
 
@@ -421,8 +428,10 @@ function resetMeLeadFormState() {
   const actionType = document.getElementById("meLeadActionType");
   const employeeSelect = document.getElementById("meLeadAssignEmp");
   const submitBtn = document.getElementById("meLeadSubmitBtn");
+  const modalTitle = document.getElementById("meLeadModalTitle");
 
   meLeadSubmitting = false;
+  meRenewalAttribution = null;
 
   if (form) {
     form.reset();
@@ -445,7 +454,26 @@ function resetMeLeadFormState() {
     submitBtn.textContent = "Add Client";
   }
 
+  if (modalTitle) {
+    modalTitle.textContent = "Add Client";
+  }
+
   toggleMeLeadActionSections();
+}
+
+function setMeLeadFormMode(mode) {
+  const modalTitle = document.getElementById("meLeadModalTitle");
+  const submitBtn = document.getElementById("meLeadSubmitBtn");
+  const isRenewalMode = mode === "renewal";
+
+  if (modalTitle) {
+    modalTitle.textContent = isRenewalMode ? "Create Renewal" : "Add Client";
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = isRenewalMode ? "Create Renewal" : "Add Client";
+  }
 }
 
 function populateMeLeadEmployeeSelect(select, employees, emptyLabel) {
@@ -495,6 +523,56 @@ function getSelectedMeLeadEmployeeMeta(selectOrId) {
     id: option?.dataset?.employeeId || "",
     contact: option?.dataset?.employeeContact || "",
   };
+}
+
+function parseMeStoredArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null || value === "") return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (err) {
+    // Fall back to comma separated values from older rows.
+  }
+
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function setMeLeadFormValue(name, value) {
+  const field = document.querySelector(`#meLeadForm [name="${name}"]`);
+  if (field) field.value = value ?? "";
+}
+
+function setMeLeadCheckboxGroup(name, values) {
+  const selectedValues = new Set(
+    parseMeStoredArray(values).map((item) => String(item)),
+  );
+
+  document.querySelectorAll(`#meLeadForm [name="${name}"]`).forEach((input) => {
+    input.checked = selectedValues.has(input.value);
+  });
+}
+
+function selectMeLeadEmployee(name, id) {
+  const select = document.getElementById("meLeadAssignEmp");
+  if (!select) return;
+
+  const normalizedId = String(id || "");
+  const normalizedName = String(name || "");
+  const match = Array.from(select.options).find((option) => {
+    return (
+      (normalizedId && option.dataset.employeeId === normalizedId) ||
+      (normalizedName && option.value === normalizedName)
+    );
+  });
+
+  if (match) {
+    select.value = match.value;
+  }
 }
 
 async function fetchMeLeadEmployeeList(date, time) {
@@ -571,6 +649,93 @@ function generateMeLeadMapLink() {
   }
 }
 
+async function populateMeLeadFormFromDeal(lead) {
+  const actionTypeValue =
+    lead.action_type === "followup" ? "followup" : "appointment";
+
+  setMeLeadFormValue("company", lead.company_name);
+  setMeLeadFormValue("client", lead.client_name);
+  setMeLeadFormValue("contact", lead.contact);
+  setMeLeadFormValue("alt_contact", lead.alternate_contact);
+  setMeLeadFormValue("telephone", lead.telephone);
+  setMeLeadFormValue("email", lead.email);
+  setMeLeadFormValue("gst_no", lead.gst_no);
+  setMeLeadFormValue("flat_no", lead.flat_no);
+  setMeLeadFormValue("building_name", lead.building_name);
+  setMeLeadFormValue("locality", lead.locality);
+  setMeLeadFormValue("city", lead.city);
+  setMeLeadFormValue("pincode", lead.pincode);
+  setMeLeadFormValue("state", lead.state);
+  setMeLeadFormValue("maps_lnk", lead.maps_lnk);
+  setMeLeadFormValue("sales_type", "renewal");
+  setMeLeadFormValue("source_lead", lead.source_lead);
+  setMeLeadFormValue("industry_type", lead.industry_type);
+  setMeLeadFormValue("service_notes", lead.service_notes);
+  setMeLeadCheckboxGroup("web_type[]", lead.web_type);
+  setMeLeadCheckboxGroup("seo_type[]", lead.seo_type);
+  setMeLeadCheckboxGroup("smo_type[]", lead.smo_type);
+  setMeLeadCheckboxGroup("app_type[]", lead.app_type);
+  setMeLeadCheckboxGroup("erp_type[]", lead.erp_type);
+  setMeLeadCheckboxGroup("services[]", lead.services);
+  setMeLeadFormValue("actionType", actionTypeValue);
+  setMeLeadFormValue("app_date", lead.app_date ? String(lead.app_date).slice(0, 10) : "");
+  setMeLeadFormValue("app_time", lead.app_time ? String(lead.app_time).slice(0, 5) : "");
+  setMeLeadFormValue("location", lead.location || lead.maps_lnk);
+  setMeLeadFormValue("follow_date", lead.follow_date ? String(lead.follow_date).slice(0, 10) : "");
+  setMeLeadFormValue("follow_time", lead.follow_time ? String(lead.follow_time).slice(0, 5) : "");
+  setMeLeadFormValue("reason", lead.reason);
+  setMeLeadFormValue("additional_notes", lead.additional_notes);
+
+  toggleMeLeadActionSections();
+  if (actionTypeValue === "appointment") {
+    await loadMeLeadEmployees();
+    selectMeLeadEmployee(lead.assign_emp, lead.assign_emp_id);
+  }
+
+  if (!lead.maps_lnk) {
+    generateMeLeadMapLink();
+  }
+}
+
+async function openMeRenewalFromDeal(leadId) {
+  try {
+    const res = await fetch(`${BASE_URL}/api/leads/${leadId}`, {
+      cache: "no-store",
+    });
+    const result = await res.json();
+
+    if (!res.ok || !result.success || !result.data) {
+      throw new Error(result.message || "Unable to load deal details");
+    }
+
+    const modal = document.getElementById("meLeadModal");
+    const form = document.getElementById("meLeadForm");
+    if (!modal || !form) return;
+
+    const lead = result.data;
+    resetMeLeadFormState();
+    meRenewalAttribution = {
+      sourceLeadId: Number(lead.id || leadId || 0) || null,
+      createdBy: Number(lead.created_by || currentUser?.id || 0) || null,
+      createdByName:
+        lead.created_by_name ||
+        lead.createdByName ||
+        (Number(lead.created_by || 0) === Number(currentUser?.id || 0)
+          ? currentUser?.name || ""
+          : ""),
+    };
+    await populateMeLeadFormFromDeal(lead);
+    setMeLeadFormMode("renewal");
+    modal.classList.remove("hidden");
+    modal.classList.add("show");
+    document.body.classList.add("modal-open");
+    form.scrollTop = 0;
+  } catch (err) {
+    console.error("ME renewal lead load error:", err);
+    showPopup("Renewal", err.message || "Server error while loading renewal form", false);
+  }
+}
+
 async function handleMeLeadFormSubmit(event) {
   event.preventDefault();
 
@@ -585,6 +750,9 @@ async function handleMeLeadFormSubmit(event) {
   const originalText = submitBtn ? submitBtn.innerHTML : "";
   const mapsLink = document.getElementById("meLeadMapsLink")?.value || "";
   const locationValue = formData.get("location") || mapsLink || "";
+  const salesTypeValue = formData.get("sales_type") || "new";
+  const renewalCreator =
+    salesTypeValue === "renewal" ? meRenewalAttribution : null;
 
   const data = {
     company: formData.get("company"),
@@ -603,7 +771,8 @@ async function handleMeLeadFormSubmit(event) {
     maps_lnk: mapsLink,
     source_lead: formData.get("source_lead"),
     industry_type: formData.get("industry_type"),
-    sales_type: formData.get("sales_type") || "new",
+    sales_type: salesTypeValue,
+    renewal_source_lead_id: renewalCreator?.sourceLeadId || null,
     web_type: formData.getAll("web_type[]"),
     seo_type: formData.getAll("seo_type[]"),
     smo_type: formData.getAll("smo_type[]"),
@@ -622,8 +791,8 @@ async function handleMeLeadFormSubmit(event) {
       actionTypeValue === "followup" ? formData.get("follow_time") : null,
     reason: actionTypeValue === "followup" ? formData.get("reason") : null,
     additional_notes: formData.get("additional_notes"),
-    created_by: currentUser?.id || null,
-    created_by_name: currentUser?.name || "",
+    created_by: renewalCreator?.createdBy || currentUser?.id || null,
+    created_by_name: renewalCreator?.createdByName || currentUser?.name || "",
     notify_whatsapp: false,
   };
 
@@ -688,10 +857,81 @@ function formatSalesTargetCount(value, singularLabel, pluralLabel) {
   return `${count} ${label}`;
 }
 
+function getDealIdentityKey(deal) {
+  const parts = [
+    deal?.email,
+    deal?.contact,
+    deal?.client_name,
+    deal?.company_name,
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+
+  return parts.join("|") || `deal-${deal?.id || Math.random()}`;
+}
+
+function escapeMeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function summarizeDealMix(deals = []) {
+  const seenClients = new Set();
+  const orderedDeals = [...deals].sort((left, right) => {
+    const leftDate = new Date(left?.closed_date || 0).getTime();
+    const rightDate = new Date(right?.closed_date || 0).getTime();
+
+    if (leftDate !== rightDate) return leftDate - rightDate;
+    return Number(left?.id || 0) - Number(right?.id || 0);
+  });
+
+  return orderedDeals.reduce(
+    (summary, deal) => {
+      const amount = normalizeMeDashboardNumber(deal?.deal_amount);
+      const key = getDealIdentityKey(deal);
+      const explicitSalesType = String(deal?.sales_type || deal?.salesType || "")
+        .toLowerCase()
+        .trim();
+      const isClosedRenewalSale =
+        explicitSalesType === "renewal" ||
+        (!explicitSalesType && seenClients.has(key));
+      const hasRenewalActivity =
+        isClosedRenewalSale ||
+        Number(deal?.has_renewal || 0) > 0 ||
+        Number(deal?.renewal_count || 0) > 0;
+
+      if (isClosedRenewalSale) {
+        summary.renewalAmount += amount;
+      } else {
+        summary.newSaleCount += 1;
+        summary.newSaleAmount += amount;
+        seenClients.add(key);
+      }
+
+      if (hasRenewalActivity) {
+        summary.renewalCount += 1;
+      }
+
+      return summary;
+    },
+    {
+      newSaleCount: 0,
+      renewalCount: 0,
+      newSaleAmount: 0,
+      renewalAmount: 0,
+    },
+  );
+}
+
 function updateMeTargetProgressInsights(target, achieved, remaining) {
   const dealsCount = normalizeMeDashboardNumber(
     meDashboardState.counts?.deals ?? meDashboardState.deals?.length,
   );
+  const salesMix = meDashboardState.salesMix || {};
   const achievedPercent =
     target > 0 ? Math.min((achieved / target) * 100, 100).toFixed(1) : "0.0";
 
@@ -726,6 +966,28 @@ function updateMeTargetProgressInsights(target, achieved, remaining) {
     dealsCount
       ? formatSalesTargetCount(dealsCount, "closed deal", "closed deals")
       : "No closed deals yet",
+  );
+  setSalesTargetText(
+    "meTargetInsightNewSale",
+    String(normalizeMeDashboardNumber(salesMix.newSaleCount)),
+  );
+  setSalesTargetText(
+    "meTargetInsightNewSaleHint",
+    salesMix.newSaleCount
+      ? `${formatSalesTargetMoney(salesMix.newSaleAmount)} from new sales`
+      : "Fresh client wins",
+  );
+  setSalesTargetText(
+    "meTargetInsightRenewal",
+    String(normalizeMeDashboardNumber(salesMix.renewalCount)),
+  );
+  setSalesTargetText(
+    "meTargetInsightRenewalHint",
+    salesMix.renewalCount
+      ? salesMix.renewalAmount
+        ? `${formatSalesTargetMoney(salesMix.renewalAmount)} closed renewal value`
+        : "Renewal activity started"
+      : "Repeat client wins",
   );
 }
 
@@ -853,6 +1115,28 @@ function handleDashboardShortcutKey(event, sectionId) {
     showSection(sectionId);
   }
 }
+
+function isDashboardPanelActionBlocked(event) {
+  return Boolean(
+    event.target.closest("a, button, input, select, textarea, .funnel-row"),
+  );
+}
+
+document.addEventListener("click", (event) => {
+  const panel = event.target.closest("[data-dashboard-section]");
+  if (!panel || isDashboardPanelActionBlocked(event)) return;
+
+  showSection(panel.dataset.dashboardSection);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const panel = event.target.closest("[data-dashboard-section]");
+  if (!panel || event.target !== panel) return;
+
+  event.preventDefault();
+  showSection(panel.dataset.dashboardSection);
+});
 
 function setMeDashboardText(id, value) {
   const element = document.getElementById(id);
@@ -1117,6 +1401,7 @@ async function loadMeDashboard() {
 
     const dealRows = deals?.success && Array.isArray(deals.data) ? deals.data : [];
     meDashboardState.deals = dealRows;
+    meDashboardState.salesMix = summarizeDealMix(dealRows);
 
     const attendanceRows =
       attendance?.success && Array.isArray(attendance.data) ? attendance.data : [];
@@ -1226,6 +1511,36 @@ async function saveMonthlyTarget() {
 }
 
 // ================= DEALS =================
+function getMeRenewalButtonMeta(deal = {}) {
+  const renewalCount = Number(deal.renewal_count || deal.has_renewal || 0);
+  const closedRenewalCount = Number(deal.renewal_closed_count || 0);
+
+  if (closedRenewalCount > 0) {
+    return {
+      className: "is-renewed",
+      iconClass: "fas fa-check-circle",
+      label: "Renewed",
+      title: "Renewal deal closed for this client",
+    };
+  }
+
+  if (renewalCount > 0) {
+    return {
+      className: "is-started",
+      iconClass: "fas fa-clock",
+      label: "Renewal Started",
+      title: "Renewal lead already created",
+    };
+  }
+
+  return {
+    className: "",
+    iconClass: "fas fa-rotate",
+    label: "Renewal",
+    title: "Create renewal from this deal",
+  };
+}
+
 async function fetchDeals() {
   if (!currentUser || !currentUser.id) return;
 
@@ -1236,6 +1551,8 @@ async function fetchDeals() {
     const container = document.getElementById("dealsContainer");
     const dealRows = data.success && Array.isArray(data.data) ? data.data : [];
 
+    meDashboardState.deals = dealRows;
+    meDashboardState.salesMix = summarizeDealMix(dealRows);
     await loadMeSalesTargetSummary(dealRows);
 
     if (!data.success || !data.data || data.data.length === 0) {
@@ -1253,28 +1570,42 @@ async function fetchDeals() {
             <th>Payment Method</th>
             <th>Closed Date</th>
             <th>PFI</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
     `;
 
     data.data.forEach((item) => {
+      const safeContact = String(item.contact || "").replace(/'/g, "\\'");
+      const safeEmail = String(item.email || "").replace(/'/g, "\\'");
+      const renewalMeta = getMeRenewalButtonMeta(item);
       table += `
         <tr>
-          <td>${item.company_name || "-"}</td>
-          <td>${item.client_name || "-"}</td>
-          <td>₹${item.deal_amount || "0"}</td>
-          <td>${item.payment_method || "-"}</td>
-          <td>${item.closed_date || "-"}</td>
+          <td>${escapeMeHtml(item.company_name || "-")}</td>
+          <td>${escapeMeHtml(item.client_name || "-")}</td>
+          <td>Rs. ${escapeMeHtml(item.deal_amount || "0")}</td>
+          <td>${escapeMeHtml(item.payment_method || "-")}</td>
+          <td>${escapeMeHtml(item.closed_date || "-")}</td>
           <td class="invoice-actions">
-            <button onclick="downloadInvoice(${item.id})" class="btn btn-invoice">
+            <button onclick="downloadInvoice(${Number(item.id || 0)})" class="btn btn-invoice">
               <i class="fas fa-download"></i>
             </button>
-            <button onclick="shareProformaWhatsApp(${item.id}, '${item.contact || ""}')" class="btn btn-whatsapp">
+            <button onclick="shareProformaWhatsApp(${Number(item.id || 0)}, '${safeContact}')" class="btn btn-whatsapp">
               <i class="fab fa-whatsapp"></i>
             </button>
-            <button onclick="shareProformaGmail('${item.email || ""}', ${item.id})" class="btn btn-gmail">
+            <button onclick="shareProformaGmail('${safeEmail}', ${Number(item.id || 0)})" class="btn btn-gmail">
               <i class="fas fa-envelope"></i>
+            </button>
+          </td>
+          <td>
+            <button
+              type="button"
+              class="btn-renewal ${renewalMeta.className}"
+              onclick="openMeRenewalFromDeal(${Number(item.id || 0)})"
+              title="${escapeMeHtml(renewalMeta.title)}"
+            >
+              <i class="${renewalMeta.iconClass}"></i> ${escapeMeHtml(renewalMeta.label)}
             </button>
           </td>
         </tr>
