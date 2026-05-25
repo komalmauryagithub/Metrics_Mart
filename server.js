@@ -494,6 +494,8 @@ let leadSalesTypeColumnReady = false;
 let leadSalesTypeColumnPromise = null;
 let leadRenewalSourceColumnReady = false;
 let leadRenewalSourceColumnPromise = null;
+let leadCompanyScopeColumnReady = false;
+let leadCompanyScopeColumnPromise = null;
 
 async function resolveSalesTargetRole(role, userId) {
   const normalizedRole = String(role || "")
@@ -3755,7 +3757,7 @@ function summarizeProjectTrackerAssignments(assignments = []) {
   };
 }
 
-async function fetchProjectTrackerData(scope, userId = null) {
+async function fetchProjectTrackerData(scope, userId = null, companyScope = "") {
   const normalizedScope = String(scope || "admin")
     .toLowerCase()
     .trim();
@@ -3765,6 +3767,10 @@ async function fetchProjectTrackerData(scope, userId = null) {
     "EXISTS (SELECT 1 FROM project_assignments pa_scope WHERE pa_scope.project_id = l.id)",
   ];
   const params = [];
+
+  if (normalizeLoginCompanyKey(companyScope) === "redsea") {
+    whereParts.push(getRedSeaLeadScopeSql("l"));
+  }
 
   if (normalizedScope === "me") {
     whereParts.push("l.assign_emp_id = ?");
@@ -4501,6 +4507,31 @@ async function ensureLeadRenewalSourceColumn() {
 
 ensureLeadRenewalSourceColumn().catch((err) => {
   console.error("Lead renewal source setup failed:", err);
+});
+
+async function ensureLeadCompanyScopeColumn() {
+  if (leadCompanyScopeColumnReady) return;
+  if (leadCompanyScopeColumnPromise) return leadCompanyScopeColumnPromise;
+
+  leadCompanyScopeColumnPromise = (async () => {
+    await runSchemaChange(
+      "ALTER TABLE leads ADD COLUMN company_scope varchar(100) DEFAULT NULL AFTER created_by",
+      "ER_DUP_FIELDNAME",
+    );
+    leadCompanyScopeColumnReady = true;
+  })();
+
+  try {
+    return await leadCompanyScopeColumnPromise;
+  } finally {
+    if (!leadCompanyScopeColumnReady) {
+      leadCompanyScopeColumnPromise = null;
+    }
+  }
+}
+
+ensureLeadCompanyScopeColumn().catch((err) => {
+  console.error("Lead company scope setup failed:", err);
 });
 
 async function ensureUserMonthlyTargetColumn() {
@@ -5543,12 +5574,19 @@ async function buildLeaveBalanceSnapshot(user, options = {}) {
   };
 }
 
-async function getLeaveBalanceUsersForAdmin() {
+async function getLeaveBalanceUsersForAdmin(companyScope = "") {
+  const whereClauses = [
+    "LOWER(TRIM(COALESCE(role, ''))) <> 'admin'",
+  ];
+  if (normalizeLoginCompanyKey(companyScope) === "redsea") {
+    whereClauses.push(getRedSeaUserScopeSql("users"));
+  }
+
   const [rows] = await dbPromise.query(
     `
       SELECT id, name, role, email, joining_date
       FROM users
-      WHERE LOWER(TRIM(COALESCE(role, ''))) <> 'admin'
+      WHERE ${whereClauses.join(" AND ")}
       ORDER BY LOWER(TRIM(COALESCE(role, ''))) ASC, name ASC, id ASC
     `,
   );
@@ -6246,6 +6284,33 @@ async function validateAttendanceAccessLocation({
     throw error;
   }
 
+  const [userRows] = await dbPromise.query(
+    `
+      SELECT role
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [userId],
+  );
+  const userRole = normalizeAttendanceRole(userRows[0]?.role);
+
+  if (userRole === "tme") {
+    return {
+      zone: {
+        type: "live_location",
+        label: "Live Location",
+        latitude: lat,
+        longitude: lng,
+        radiusMeters: 0,
+        address: "TME live attendance location",
+        locationUrl: buildAttendanceLocationUrl(lat, lng),
+      },
+      zoneType: "live_location",
+      distanceMeters: 0,
+    };
+  }
+
   const officeZone = getAttendanceOfficeZone();
   const officeMatch = evaluateAttendanceZoneDistance(
     lat,
@@ -6723,7 +6788,13 @@ function buildAttendanceMonthlySummary({
 
 app.get("/test-users", async (req, res) => {
   try {
-    const [rows] = await dbPromise.query("SELECT * FROM users");
+    const whereParts = [];
+    if (getRequestedCompanyScope(req) === "redsea") {
+      whereParts.push(getRedSeaUserScopeSql("users"));
+    }
+    const [rows] = await dbPromise.query(
+      `SELECT * FROM users${whereParts.length ? ` WHERE ${whereParts.join(" AND ")}` : ""}`,
+    );
     res.json(
       rows.map((row) => {
         const {
@@ -7543,17 +7614,146 @@ app.post("/api/profile-setup/:token", (req, res) => {
 });
 
 // ====================== LOGIN ======================
+function normalizeLoginCompanyKey(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  if (normalized === "redsea" || normalized === "redseadigitals") {
+    return "redsea";
+  }
+
+  if (
+    normalized === "metrics" ||
+    normalized === "metricsmart" ||
+    normalized === "metricsmartinfolinepvtltd"
+  ) {
+    return "metrics";
+  }
+
+  return "";
+}
+
+function getLoginCompanyName(companyKey) {
+  return companyKey === "redsea" ? "RedSea" : "Metrics Mart Infoline Pvt Ltd";
+}
+
+function getLoginCompanyCondition(companyKey) {
+  if (companyKey === "redsea") {
+    return {
+      sql: `
+        AND LOWER(REPLACE(TRIM(COALESCE(comp_name, '')), ' ', '')) IN
+          ('redsea', 'redseadigitals')
+      `,
+      params: [],
+    };
+  }
+
+  return {
+    sql: `
+      AND (
+        TRIM(COALESCE(comp_name, '')) = ''
+        OR LOWER(REPLACE(TRIM(COALESCE(comp_name, '')), ' ', '')) IN
+          ('metrics', 'metricsmart', 'metricsmartinfolinepvtltd')
+      )
+    `,
+    params: [],
+  };
+}
+
+function getRequestedCompanyScope(req) {
+  return normalizeLoginCompanyKey(
+    req?.query?.companyScope ||
+      req?.query?.company ||
+      req?.query?.company_key ||
+      req?.body?.companyScope ||
+      req?.body?.company ||
+      req?.body?.company_key,
+  );
+}
+
+function getRedSeaUserScopeSql(userAlias = "u") {
+  return `
+    LOWER(REPLACE(TRIM(COALESCE(${userAlias}.comp_name, '')), ' ', '')) IN
+      ('redsea', 'redseadigitals')
+  `;
+}
+
+function getRedSeaLeadScopeSql(leadAlias = "l") {
+  return `
+    (
+      LOWER(REPLACE(TRIM(COALESCE(${leadAlias}.company_scope, '')), ' ', '')) IN
+        ('redsea', 'redseadigitals')
+      OR EXISTS (
+        SELECT 1
+        FROM users company_scope_user
+        WHERE company_scope_user.id = ${leadAlias}.created_by
+          AND ${getRedSeaUserScopeSql("company_scope_user")}
+      )
+    )
+  `;
+}
+
+function addRequestedLeadCompanyScope(req, whereParts, leadAlias = "l") {
+  if (getRequestedCompanyScope(req) === "redsea") {
+    whereParts.push(getRedSeaLeadScopeSql(leadAlias));
+  }
+}
+
+function addRequestedLeaveCompanyScope(req, whereParts, leaveAlias = "lr") {
+  if (getRequestedCompanyScope(req) === "redsea") {
+    whereParts.push(`
+      EXISTS (
+        SELECT 1
+        FROM users leave_scope_user
+        WHERE leave_scope_user.id = ${leaveAlias}.user_id
+          AND ${getRedSeaUserScopeSql("leave_scope_user")}
+      )
+    `);
+  }
+}
+
+function normalizeLoginRoleForPanel(role) {
+  const normalizedRole = String(role || "")
+    .toLowerCase()
+    .trim();
+
+  return normalizedRole === "acc" ? "accounts" : normalizedRole;
+}
+
+async function getCompanyScopeForUser(userId) {
+  const normalizedUserId = Number(userId);
+  if (!normalizedUserId) return getLoginCompanyName("metrics");
+
+  const [rows] = await dbPromise.query(
+    `
+      SELECT comp_name
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [normalizedUserId],
+  );
+
+  const companyKey = normalizeLoginCompanyKey(rows[0]?.comp_name);
+  return getLoginCompanyName(companyKey || "metrics");
+}
+
 app.post("/login", async (req, res) => {
   const { emailOrContact, email, password } = req.body || {};
   const loginId = (emailOrContact || email || "").trim();
+  const companyKey = normalizeLoginCompanyKey(
+    req.body?.company || req.body?.companyKey || req.body?.comp_name,
+  );
 
-  if (!loginId || !password) {
+  if (!loginId || !password || !companyKey) {
     return res.status(400).json({
       success: false,
-      message: "Email/Contact and Password are required",
+      message: "Email/Contact, Company and Password are required",
     });
   }
 
+  const companyCondition = getLoginCompanyCondition(companyKey);
   const sql = `
     SELECT
       id,
@@ -7568,19 +7768,29 @@ app.post("/login", async (req, res) => {
       profile_setup_completed_at
     FROM users
     WHERE (email = ? OR contact = ?) AND spswd = ?
+    ${companyCondition.sql}
   `;
 
   try {
     await ensureUserProfileSetupColumns();
-    const [results] = await dbPromise.query(sql, [loginId, loginId, password]);
+    const [results] = await dbPromise.query(sql, [
+      loginId,
+      loginId,
+      password,
+      ...companyCondition.params,
+    ]);
 
     if (results.length > 0) {
-      const statusDetails = getProfileSetupStatusDetails(results[0]);
+      const user = results[0];
+      const statusDetails = getProfileSetupStatusDetails(user);
       return res.json({
         success: true,
         message: "Login successful",
         user: {
-          ...results[0],
+          ...user,
+          role: normalizeLoginRoleForPanel(user.role),
+          company_key: companyKey,
+          selected_company: getLoginCompanyName(companyKey),
           profile_setup_status: statusDetails.status,
           profile_setup_link_expired: statusDetails.isExpired,
         },
@@ -7589,7 +7799,7 @@ app.post("/login", async (req, res) => {
 
     res.status(401).json({
       success: false,
-      message: "Invalid email or password",
+      message: "Invalid email, company or password",
     });
   } catch (err) {
     console.error("Login DB Error:", err);
@@ -8114,6 +8324,13 @@ app.get("/api/hr/employees", async (req, res) => {
     await ensurePayrollUserColumns();
 
     const attendanceStatusSql = getAttendanceStatusSql("a", "u");
+    const userWhereParts = [
+      "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
+    ];
+    if (getRequestedCompanyScope(req) === "redsea") {
+      userWhereParts.push(getRedSeaUserScopeSql("u"));
+    }
+
     const [rows] = await dbPromise.query(
       `
         SELECT
@@ -8180,7 +8397,7 @@ app.get("/api/hr/employees", async (req, res) => {
             AND CURDATE() BETWEEN lr.from_date AND lr.to_date
           GROUP BY lr.user_id
         ) lt ON lt.user_id = u.id
-        WHERE LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'
+        WHERE ${userWhereParts.join("\n          AND ")}
         ORDER BY
           FIELD(LOWER(TRIM(COALESCE(u.role, ''))), 'hr', 'tme', 'me', 'dev', 'seo', 'smo', 'accounts', 'dm'),
           u.name ASC,
@@ -8795,6 +9012,9 @@ app.post("/api/leads", async (req, res) => {
   const appointmentStatus = hasAppointmentDate
     ? normalizeAppointmentStatus(data.appointment_status, "generated")
     : null;
+  const companyScope =
+    String(data.company_scope || data.companyScope || "").trim() ||
+    (await getCompanyScopeForUser(data.created_by));
 
   const sql = `
       INSERT INTO leads (
@@ -8808,8 +9028,9 @@ app.post("/api/leads", async (req, res) => {
         app_date, app_time, assign_emp, assign_emp_id, location,
         follow_date, follow_time, reason,
         additional_notes,
-        created_by 
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_by,
+        company_scope
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
   const values = [
@@ -8850,11 +9071,13 @@ app.post("/api/leads", async (req, res) => {
     data.reason || null,
     data.additional_notes || null,
     data.created_by || null,
+    companyScope,
   ];
 
   try {
     await ensureLeadAppointmentStatusColumn();
     await ensureLeadRenewalSourceColumn();
+    await ensureLeadCompanyScopeColumn();
     const [result] = await dbPromise.query(sql, values);
     const whatsapp = data.notify_whatsapp
       ? await buildLeadWhatsappPayload(data, "create")
@@ -8880,6 +9103,7 @@ app.get("/api/leads", (req, res) => {
   const scope = String(req.query.scope || "")
     .toLowerCase()
     .trim();
+  const companyScope = getRequestedCompanyScope(req);
 
   // 🔥 normalize role
   role = role ? role.toLowerCase().trim() : "";
@@ -8888,7 +9112,11 @@ app.get("/api/leads", (req, res) => {
   let values = [];
 
   if (role === "admin") {
-    sql = "SELECT * FROM leads ORDER BY id ASC";
+    const whereParts = [];
+    if (companyScope === "redsea") {
+      whereParts.push(getRedSeaLeadScopeSql("leads"));
+    }
+    sql = `SELECT * FROM leads${whereParts.length ? ` WHERE ${whereParts.join(" AND ")}` : ""} ORDER BY id ASC`;
   } else if (role === "tme") {
     if (!userId) {
       return res
@@ -9208,6 +9436,8 @@ app.get("/api/appointments", async (req, res) => {
 
   let sql = "";
   let params = [];
+  const scopedWhereParts = [];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
 
   if (includeHistory) {
     sql = `
@@ -9217,6 +9447,9 @@ app.get("/api/appointments", async (req, res) => {
       FROM leads
       WHERE app_date IS NOT NULL
     `;
+    if (scopedWhereParts.length) {
+      sql += ` AND ${scopedWhereParts.join(" AND ")}`;
+    }
 
     if (role !== "admin") {
       if (!userId) {
@@ -9238,6 +9471,7 @@ app.get("/api/appointments", async (req, res) => {
         ${getAppointmentStageSql()} AS appointment_stage
       FROM leads
       WHERE action_type = 'appointment'
+      ${scopedWhereParts.length ? `AND ${scopedWhereParts.join(" AND ")}` : ""}
       ORDER BY app_date ASC, app_time ASC
     `;
   } else {
@@ -9262,6 +9496,7 @@ app.get("/api/appointments", async (req, res) => {
 
   try {
     await ensureLeadAppointmentStatusColumn();
+    await ensureLeadCompanyScopeColumn();
     const [result] = await dbPromise.query(sql, params);
     res.json({ success: true, data: result });
   } catch (err) {
@@ -9364,6 +9599,8 @@ app.get("/api/followups", (req, res) => {
   const role = String(req.query.role || "")
     .toLowerCase()
     .trim();
+  const scopedWhereParts = [];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
 
   let sql = "";
   let params = [];
@@ -9372,6 +9609,7 @@ app.get("/api/followups", (req, res) => {
     sql = `
       SELECT * FROM leads
       WHERE action_type = 'followup'
+      ${scopedWhereParts.length ? `AND ${scopedWhereParts.join(" AND ")}` : ""}
       ORDER BY follow_date DESC, follow_time DESC, id DESC
     `;
   } else {
@@ -9773,12 +10011,14 @@ app.get("/api/deals/:id", async (req, res) => {
 app.get("/api/deals", async (req, res) => {
   try {
     await ensureLeadRenewalSourceColumn();
+    await ensureLeadCompanyScopeColumn();
 
     const role = String(req.query.role || "")
       .toLowerCase()
       .trim();
     const values = [];
     const whereParts = ["l.lead_status = 'deal_closed'"];
+    addRequestedLeadCompanyScope(req, whereParts, "l");
 
     if (role !== "admin" && role !== "accounts") {
       const ownerScope = await getDealOwnerScope(req.query.userId);
@@ -11229,6 +11469,12 @@ app.get("/api/admin/attendance", async (req, res) => {
     await ensureAttendanceTable();
     await ensureUserShiftColumns();
     const monthStartDate = getAttendanceMonthStart(selectedDate);
+    const userWhereParts = [
+      "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
+    ];
+    if (getRequestedCompanyScope(req) === "redsea") {
+      userWhereParts.push(getRedSeaUserScopeSql("u"));
+    }
 
     const [rows] = await dbPromise.query(
       `
@@ -11248,7 +11494,7 @@ app.get("/api/admin/attendance", async (req, res) => {
         LEFT JOIN attendance a
           ON a.user_id = u.id
           AND a.attendance_date = ?
-        WHERE LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'
+        WHERE ${userWhereParts.join("\n          AND ")}
         ORDER BY u.name ASC
       `,
       [selectedDate],
@@ -11268,7 +11514,7 @@ app.get("/api/admin/attendance", async (req, res) => {
         LEFT JOIN attendance a
           ON a.user_id = u.id
           AND a.attendance_date BETWEEN ? AND ?
-        WHERE LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'
+        WHERE ${userWhereParts.join("\n          AND ")}
         ORDER BY u.name ASC, a.attendance_date ASC
       `,
       [monthStartDate, selectedDate],
@@ -11368,6 +11614,9 @@ app.get("/api/admin/attendance/location-requests", async (req, res) => {
 
     const filters = ["r.attendance_date = ?", "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'"];
     const params = [attendanceDate];
+    if (getRequestedCompanyScope(req) === "redsea") {
+      filters.push(getRedSeaUserScopeSql("u"));
+    }
 
     if (roleFilter) {
       filters.push("LOWER(TRIM(COALESCE(u.role, ''))) = ?");
@@ -12018,6 +12267,8 @@ app.get("/api/admin/leaves", async (req, res) => {
 
     const whereClauses = [];
     const params = [];
+    addRequestedLeaveCompanyScope(req, whereClauses, "leave_requests");
+    addRequestedLeaveCompanyScope(req, whereClauses, "leave_requests");
 
     if (roleFilter) {
       whereClauses.push("LOWER(TRIM(role)) = ?");
@@ -12040,6 +12291,11 @@ app.get("/api/admin/leaves", async (req, res) => {
     }
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const summaryWhereClauses = [];
+    addRequestedLeaveCompanyScope(req, summaryWhereClauses, "leave_requests");
+    const summaryWhereSql = summaryWhereClauses.length
+      ? `WHERE ${summaryWhereClauses.join(" AND ")}`
+      : "";
     const [rows] = await dbPromise.query(
       `
         SELECT
@@ -12093,10 +12349,11 @@ app.get("/api/admin/leaves", async (req, res) => {
             ELSE NULL
           END) AS employeesOnLeaveToday
         FROM leave_requests
+        ${summaryWhereSql}
       `,
     );
 
-    const balanceUsers = await getLeaveBalanceUsersForAdmin();
+    const balanceUsers = await getLeaveBalanceUsersForAdmin(getRequestedCompanyScope(req));
     const serializedBalances = await Promise.all(
       balanceUsers.map(async (user) =>
         serializeLeaveBalanceSnapshot(await buildLeaveBalanceSnapshot(user)),
@@ -12158,6 +12415,7 @@ app.get("/api/hr/leaves", async (req, res) => {
 
     const whereClauses = [];
     const params = [];
+    addRequestedLeaveCompanyScope(req, whereClauses, "leave_requests");
 
     if (roleFilter) {
       whereClauses.push("LOWER(TRIM(role)) = ?");
@@ -12180,6 +12438,11 @@ app.get("/api/hr/leaves", async (req, res) => {
     }
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const summaryWhereClauses = [];
+    addRequestedLeaveCompanyScope(req, summaryWhereClauses, "leave_requests");
+    const summaryWhereSql = summaryWhereClauses.length
+      ? `WHERE ${summaryWhereClauses.join(" AND ")}`
+      : "";
     const [rows] = await dbPromise.query(
       `
         SELECT
@@ -12233,10 +12496,11 @@ app.get("/api/hr/leaves", async (req, res) => {
             ELSE NULL
           END) AS employeesOnLeaveToday
         FROM leave_requests
+        ${summaryWhereSql}
       `,
     );
 
-    const balanceUsers = await getLeaveBalanceUsersForAdmin();
+    const balanceUsers = await getLeaveBalanceUsersForAdmin(getRequestedCompanyScope(req));
     const serializedBalances = await Promise.all(
       balanceUsers.map(async (user) =>
         serializeLeaveBalanceSnapshot(await buildLeaveBalanceSnapshot(user)),
@@ -12951,6 +13215,7 @@ async function getPayrollUsers(filters = {}) {
   const roleFilter = normalizeRoleValue(filters.roleFilter);
   const departmentFilter = String(filters.departmentFilter || "").trim().toLowerCase();
   const searchTerm = String(filters.searchTerm || "").trim().toLowerCase();
+  const companyScope = normalizeLoginCompanyKey(filters.companyScope);
 
   const whereClauses = [
     `LOWER(TRIM(COALESCE(role, ''))) IN (${Array.from(PAYROLL_SUPPORTED_ROLES)
@@ -12958,6 +13223,10 @@ async function getPayrollUsers(filters = {}) {
       .join(", ")})`,
   ];
   const params = Array.from(PAYROLL_SUPPORTED_ROLES);
+
+  if (companyScope === "redsea") {
+    whereClauses.push(getRedSeaUserScopeSql("users"));
+  }
 
   if (roleFilter && PAYROLL_SUPPORTED_ROLES.has(roleFilter)) {
     whereClauses.push("LOWER(TRIM(COALESCE(role, ''))) = ?");
@@ -13924,12 +14193,14 @@ async function buildPayrollOverviewCore({
   roleFilter,
   departmentFilter,
   searchTerm,
+  companyScope,
 }) {
   const normalizedMonthKey = normalizePayrollMonthKey(monthKey);
   const users = await getPayrollUsers({
     roleFilter,
     departmentFilter,
     searchTerm,
+    companyScope,
   });
 
   if (shouldAutoSyncPayrollMonth(normalizedMonthKey)) {
@@ -14013,6 +14284,7 @@ async function buildPayrollOverview({
   roleFilter,
   departmentFilter,
   searchTerm,
+  companyScope,
 }) {
   await ensureAdminAccess(adminId);
   return buildPayrollOverviewCore({
@@ -14020,6 +14292,7 @@ async function buildPayrollOverview({
     roleFilter,
     departmentFilter,
     searchTerm,
+    companyScope,
   });
 }
 
@@ -14096,6 +14369,7 @@ app.get("/api/payroll/admin/overview", async (req, res) => {
       roleFilter: req.query.role,
       departmentFilter: req.query.department,
       searchTerm: req.query.search,
+      companyScope: getRequestedCompanyScope(req),
     });
 
     res.json({
@@ -14128,6 +14402,7 @@ app.get("/api/hr/payroll/overview", async (req, res) => {
       roleFilter: req.query.role,
       departmentFilter: req.query.department,
       searchTerm: req.query.search,
+      companyScope: getRequestedCompanyScope(req),
     });
 
     res.json({
@@ -14184,7 +14459,9 @@ app.post("/api/payroll/admin/generate", async (req, res) => {
 
   try {
     await ensureAdminAccess(adminId);
-    const allUsers = await getPayrollUsers();
+    const allUsers = await getPayrollUsers({
+      companyScope: await getCompanyScopeForUser(adminId),
+    });
     const userMap = new Map(allUsers.map((user) => [Number(user.id), user]));
     const targetPayloads = employeesPayload.length
       ? employeesPayload
@@ -14262,6 +14539,7 @@ app.get("/api/payroll/admin/export", async (req, res) => {
       roleFilter: req.query.role,
       departmentFilter: req.query.department,
       searchTerm: req.query.search,
+      companyScope: getRequestedCompanyScope(req),
     });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -14539,11 +14817,19 @@ app.get("/api/reports/counts", (req, res) => {
   let followQuery = "";
 
   if (role === "admin") {
-    leadQuery = "SELECT COUNT(*) AS total FROM leads";
+    const scopedWhereParts = [];
+    addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+    const scopeWhere = scopedWhereParts.length
+      ? ` WHERE ${scopedWhereParts.join(" AND ")}`
+      : "";
+    const scopeAnd = scopedWhereParts.length
+      ? ` AND ${scopedWhereParts.join(" AND ")}`
+      : "";
+    leadQuery = `SELECT COUNT(*) AS total FROM leads${scopeWhere}`;
     appointmentQuery =
-      "SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment'";
+      `SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment'${scopeAnd}`;
     followQuery =
-      "SELECT COUNT(*) AS total FROM leads WHERE action_type='followup'";
+      `SELECT COUNT(*) AS total FROM leads WHERE action_type='followup'${scopeAnd}`;
 
     db.query(leadQuery, (err, leads) => {
       db.query(appointmentQuery, (err2, appointments) => {
@@ -14674,6 +14960,12 @@ app.get("/api/reports/counts", (req, res) => {
 });
 
 app.get("/api/projects", (req, res) => {
+  const scopedWhereParts = [
+    "lead_status = 'deal_closed'",
+    "pay_stat = 'received'",
+  ];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+
   const sql = `
       SELECT 
         id,
@@ -14688,8 +14980,7 @@ app.get("/api/projects", (req, res) => {
         erp_type,
         'Ongoing' AS status
       FROM leads 
-      WHERE lead_status = 'deal_closed'
-      AND pay_stat = 'received'
+      WHERE ${scopedWhereParts.join("\n      AND ")}
       ORDER BY closed_date DESC
     `;
 
@@ -14798,6 +15089,13 @@ app.get("/api/available-team", (req, res) => {
     return res.json({ success: true, data: [] });
   }
 
+  const userWhereParts = [
+    "LOWER(TRIM(u.role)) NOT IN ('me', 'tme', 'admin', 'hr', 'accounts')",
+  ];
+  if (getRequestedCompanyScope(req) === "redsea") {
+    userWhereParts.push(getRedSeaUserScopeSql("u"));
+  }
+
   const sql = `
     SELECT
       u.id,
@@ -14805,7 +15103,7 @@ app.get("/api/available-team", (req, res) => {
       u.role,
       u.skills
     FROM users u
-    WHERE LOWER(TRIM(u.role)) NOT IN ('me', 'tme', 'admin', 'hr', 'accounts')
+    WHERE ${userWhereParts.join("\n      AND ")}
     ORDER BY LOWER(TRIM(u.role)) ASC, u.name ASC
   `;
 
@@ -14872,6 +15170,16 @@ app.get("/api/available-team", (req, res) => {
 
 
 app.get("/api/admin/team-report", async (req, res) => {
+  const userWhereParts = [
+    "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
+  ];
+  const leadJoinScopeParts = [];
+
+  if (getRequestedCompanyScope(req) === "redsea") {
+    userWhereParts.push(getRedSeaUserScopeSql("u"));
+  }
+  addRequestedLeadCompanyScope(req, leadJoinScopeParts, "l");
+
   const sql = `
       SELECT
         u.id,
@@ -14888,7 +15196,9 @@ app.get("/api/admin/team-report", async (req, res) => {
         CASE WHEN lt.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_on_leave_today,
         lt.leave_type AS today_leave_type
       FROM users u
-      LEFT JOIN leads l ON l.assign_emp_id = u.id
+      LEFT JOIN leads l
+        ON l.assign_emp_id = u.id
+        ${leadJoinScopeParts.length ? `AND ${leadJoinScopeParts.join(" AND ")}` : ""}
       LEFT JOIN (
         SELECT
           lr.user_id,
@@ -14898,7 +15208,7 @@ app.get("/api/admin/team-report", async (req, res) => {
           AND CURDATE() BETWEEN lr.from_date AND lr.to_date
         GROUP BY lr.user_id
       ) lt ON lt.user_id = u.id
-      WHERE u.role != 'admin'
+      WHERE ${userWhereParts.join("\n        AND ")}
       GROUP BY
         u.id,
         u.name,
@@ -14916,6 +15226,7 @@ app.get("/api/admin/team-report", async (req, res) => {
   try {
     await ensureLeaveRequestsTable();
     await ensureUserProfileSetupColumns();
+    await ensureLeadCompanyScopeColumn();
     const [result] = await dbPromise.query(sql);
     res.json({
       success: true,
@@ -15024,6 +15335,7 @@ async function sendProjectAssignmentsByUser(
   userId,
   res,
   logLabel = "Projects",
+  req = null,
 ) {
   if (!userId) {
     return res.status(400).json({
@@ -15031,6 +15343,12 @@ async function sendProjectAssignmentsByUser(
       message: "Invalid userId",
     });
   }
+
+  const scopedWhereParts = [];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "l");
+  const scopeAnd = scopedWhereParts.length
+    ? ` AND ${scopedWhereParts.join(" AND ")}`
+    : "";
 
   const sql = `
     SELECT
@@ -15051,12 +15369,14 @@ async function sendProjectAssignmentsByUser(
     FROM project_assignments pa
     JOIN leads l ON pa.project_id = l.id
     WHERE pa.user_id = ?
+      ${scopeAnd}
     ORDER BY pa.assigned_at DESC
   `;
 
   try {
     await ensureProjectAssignmentWorkflowColumns();
     await ensureProjectPhaseDetailsTable();
+    await ensureLeadCompanyScopeColumn();
 
     const [rows] = await dbPromise.query(sql, [userId]);
     const projects = await mapRowsToSharedProjectAssignments(rows || []);
@@ -15076,13 +15396,20 @@ async function sendProjectAssignmentsByUser(
   }
 }
 
-async function sendSeoProjectAssignments(userId, res) {
+async function sendSeoProjectAssignments(
+  userId,
+  res,
+  req = null,
+  fallbackServiceType = "seo",
+) {
   if (!userId) {
     return res.status(400).json({
       success: false,
       message: "Invalid userId",
     });
   }
+  const normalizedFallbackServiceType =
+    normalizeProjectServiceKey(fallbackServiceType) || "seo";
 
   const baseSelect = `
     SELECT
@@ -15103,15 +15430,22 @@ async function sendSeoProjectAssignments(userId, res) {
     FROM project_assignments pa
     JOIN leads l ON pa.project_id = l.id
   `;
+  const scopedWhereParts = [];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "l");
+  const scopeAnd = scopedWhereParts.length
+    ? ` AND ${scopedWhereParts.join(" AND ")}`
+    : "";
 
   try {
     await ensureProjectAssignmentWorkflowColumns();
     await ensureProjectPhaseDetailsTable();
+    await ensureLeadCompanyScopeColumn();
 
     const [userRows] = await dbPromise.query(
       `
         ${baseSelect}
         WHERE pa.user_id = ?
+          ${scopeAnd}
         ORDER BY pa.assigned_at DESC
       `,
       [userId],
@@ -15124,9 +15458,11 @@ async function sendSeoProjectAssignments(userId, res) {
             await dbPromise.query(
               `
                 ${baseSelect}
-                WHERE LOWER(TRIM(COALESCE(pa.service_type, ''))) = 'seo'
+                WHERE LOWER(TRIM(COALESCE(pa.service_type, ''))) = ?
+                  ${scopeAnd}
                 ORDER BY pa.assigned_at DESC
               `,
+              [normalizedFallbackServiceType],
             )
           )[0] || [];
     const projects = await mapRowsToSharedProjectAssignments(rowsToSend);
@@ -15138,7 +15474,7 @@ async function sendSeoProjectAssignments(userId, res) {
       completed: projects.filter((project) => project.status === "completed"),
     });
   } catch (err) {
-    console.error("SEO Projects Fetch Error:", err);
+    console.error(`${normalizedFallbackServiceType.toUpperCase()} Projects Fetch Error:`, err);
     return res.status(500).json({
       success: false,
       message: "Database error",
@@ -15606,19 +15942,25 @@ async function mapRowsToSharedProjectAssignments(rows = []) {
 // ================= DEV PROJECTS =================
 app.get("/api/dev/projects/:userId", (req, res) => {
   const userId = parseInt(req.params.userId, 10);
-  sendProjectAssignmentsByUser(userId, res, "DEV Projects");
+  sendProjectAssignmentsByUser(userId, res, "DEV Projects", req);
 });
 
 // ================= DM PROJECTS =================
 app.get("/api/dm/projects/:userId", (req, res) => {
   const userId = parseInt(req.params.userId, 10);
-  sendProjectAssignmentsByUser(userId, res, "DM Projects");
+  sendProjectAssignmentsByUser(userId, res, "DM Projects", req);
 });
 
 // ================= SEO PROJECTS =================
 app.get("/api/seo/projects/:userId", (req, res) => {
   const userId = parseInt(req.params.userId, 10);
-  sendSeoProjectAssignments(userId, res);
+  sendSeoProjectAssignments(userId, res, req, "seo");
+});
+
+// ================= SMO PROJECTS =================
+app.get("/api/smo/projects/:userId", (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  sendSeoProjectAssignments(userId, res, req, "smo");
 });
 
 app.get("/api/project-tracker", async (req, res) => {
@@ -15637,8 +15979,13 @@ app.get("/api/project-tracker", async (req, res) => {
   try {
     await ensureProjectAssignmentWorkflowColumns();
     await ensureProjectPhaseDetailsTable();
+    await ensureLeadCompanyScopeColumn();
 
-    const payload = await fetchProjectTrackerData(scope, userId);
+    const payload = await fetchProjectTrackerData(
+      scope,
+      userId,
+      getRequestedCompanyScope(req),
+    );
     res.json({
       success: true,
       scope,
@@ -16147,6 +16494,13 @@ app.post("/api/project/update-stage", async (req, res) => {
 
 app.get("/api/projects-summary", async (req, res) => {
   try {
+    await ensureLeadCompanyScopeColumn();
+    const scopedWhereParts = [];
+    addRequestedLeadCompanyScope(req, scopedWhereParts, "l");
+    const scopeWhere = scopedWhereParts.length
+      ? `WHERE ${scopedWhereParts.join(" AND ")}`
+      : "";
+
     const [projects] = await dbPromise.query(`
       SELECT
         l.id AS project_id,
@@ -16175,6 +16529,7 @@ app.get("/api/projects-summary", async (req, res) => {
         FROM project_assignments pa
         GROUP BY pa.project_id
       ) pa_summary ON pa_summary.project_id = l.id
+      ${scopeWhere}
       ORDER BY COALESCE(pa_summary.assigned_at, l.closed_date, l.created_at) DESC
     `);
 
@@ -16271,6 +16626,12 @@ app.get("/api/projects-summary", async (req, res) => {
 });
 
 app.get("/api/projects", (req, res) => {
+  const scopedWhereParts = [
+    "lead_status = 'deal_closed'",
+    "pay_stat = 'received'",
+  ];
+  addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+
   const sql = `
     SELECT
       id,
@@ -16285,8 +16646,7 @@ app.get("/api/projects", (req, res) => {
       erp_type,
       'Ongoing' AS status
     FROM leads
-    WHERE lead_status = 'deal_closed'
-    AND pay_stat = 'received'
+    WHERE ${scopedWhereParts.join("\n    AND ")}
     ORDER BY closed_date DESC
   `;
 
