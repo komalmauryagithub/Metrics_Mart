@@ -12,6 +12,7 @@
   let currentReject = null;
   let activeCaptureHandler = null;
 
+
   function stopCamera() {
     if (activeStream) {
       activeStream.getTracks().forEach((track) => track.stop());
