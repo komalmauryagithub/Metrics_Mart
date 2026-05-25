@@ -944,6 +944,11 @@ const registrationUploadFolders = Object.freeze({
   certification_file: "certifications",
 });
 
+Object.values(registrationUploadFolders).forEach((folderName) => {
+  ensureUploadDirectory(path.join(uploadsDir, folderName));
+});
+ensureUploadDirectory(path.join(uploadsDir, "registration-documents"));
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const folderName =
@@ -3768,8 +3773,9 @@ async function fetchProjectTrackerData(scope, userId = null, companyScope = "") 
   ];
   const params = [];
 
-  if (normalizeLoginCompanyKey(companyScope) === "redsea") {
-    whereParts.push(getRedSeaLeadScopeSql("l"));
+  const companyScopeSql = getCompanyLeadScopeSql(companyScope, "l");
+  if (companyScopeSql) {
+    whereParts.push(companyScopeSql);
   }
 
   if (normalizedScope === "me") {
@@ -5578,8 +5584,9 @@ async function getLeaveBalanceUsersForAdmin(companyScope = "") {
   const whereClauses = [
     "LOWER(TRIM(COALESCE(role, ''))) <> 'admin'",
   ];
-  if (normalizeLoginCompanyKey(companyScope) === "redsea") {
-    whereClauses.push(getRedSeaUserScopeSql("users"));
+  const userScopeSql = getCompanyUserScopeSql(companyScope, "users");
+  if (userScopeSql) {
+    whereClauses.push(userScopeSql);
   }
 
   const [rows] = await dbPromise.query(
@@ -6789,9 +6796,7 @@ function buildAttendanceMonthlySummary({
 app.get("/test-users", async (req, res) => {
   try {
     const whereParts = [];
-    if (getRequestedCompanyScope(req) === "redsea") {
-      whereParts.push(getRedSeaUserScopeSql("users"));
-    }
+    addRequestedUserCompanyScope(req, whereParts, "users");
     const [rows] = await dbPromise.query(
       `SELECT * FROM users${whereParts.length ? ` WHERE ${whereParts.join(" AND ")}` : ""}`,
     );
@@ -7679,6 +7684,23 @@ function getRedSeaUserScopeSql(userAlias = "u") {
   `;
 }
 
+function getMetricsUserScopeSql(userAlias = "u") {
+  return `
+    (
+      TRIM(COALESCE(${userAlias}.comp_name, '')) = ''
+      OR LOWER(REPLACE(TRIM(COALESCE(${userAlias}.comp_name, '')), ' ', '')) IN
+        ('metrics', 'metricsmart', 'metricsmartinfolinepvtltd')
+    )
+  `;
+}
+
+function getCompanyUserScopeSql(companyScope, userAlias = "u") {
+  const normalizedScope = normalizeLoginCompanyKey(companyScope);
+  if (normalizedScope === "redsea") return getRedSeaUserScopeSql(userAlias);
+  if (normalizedScope === "metrics") return getMetricsUserScopeSql(userAlias);
+  return "";
+}
+
 function getRedSeaLeadScopeSql(leadAlias = "l") {
   return `
     (
@@ -7688,26 +7710,67 @@ function getRedSeaLeadScopeSql(leadAlias = "l") {
         SELECT 1
         FROM users company_scope_user
         WHERE company_scope_user.id = ${leadAlias}.created_by
+          AND TRIM(COALESCE(${leadAlias}.company_scope, '')) = ''
           AND ${getRedSeaUserScopeSql("company_scope_user")}
       )
     )
   `;
 }
 
+function getMetricsLeadScopeSql(leadAlias = "l") {
+  return `
+    (
+      LOWER(REPLACE(TRIM(COALESCE(${leadAlias}.company_scope, '')), ' ', '')) IN
+        ('metrics', 'metricsmart', 'metricsmartinfolinepvtltd')
+      OR (
+        TRIM(COALESCE(${leadAlias}.company_scope, '')) = ''
+        AND (
+          ${leadAlias}.created_by IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM users company_scope_user
+            WHERE company_scope_user.id = ${leadAlias}.created_by
+              AND ${getMetricsUserScopeSql("company_scope_user")}
+          )
+        )
+      )
+    )
+  `;
+}
+
+function getCompanyLeadScopeSql(companyScope, leadAlias = "l") {
+  const normalizedScope = normalizeLoginCompanyKey(companyScope);
+  if (normalizedScope === "redsea") return getRedSeaLeadScopeSql(leadAlias);
+  if (normalizedScope === "metrics") return getMetricsLeadScopeSql(leadAlias);
+  return "";
+}
+
+function addRequestedUserCompanyScope(req, whereParts, userAlias = "u") {
+  const scopeSql = getCompanyUserScopeSql(getRequestedCompanyScope(req), userAlias);
+  if (scopeSql) {
+    whereParts.push(scopeSql);
+  }
+}
+
 function addRequestedLeadCompanyScope(req, whereParts, leadAlias = "l") {
-  if (getRequestedCompanyScope(req) === "redsea") {
-    whereParts.push(getRedSeaLeadScopeSql(leadAlias));
+  const scopeSql = getCompanyLeadScopeSql(getRequestedCompanyScope(req), leadAlias);
+  if (scopeSql) {
+    whereParts.push(scopeSql);
   }
 }
 
 function addRequestedLeaveCompanyScope(req, whereParts, leaveAlias = "lr") {
-  if (getRequestedCompanyScope(req) === "redsea") {
+  const userScopeSql = getCompanyUserScopeSql(
+    getRequestedCompanyScope(req),
+    "leave_scope_user",
+  );
+  if (userScopeSql) {
     whereParts.push(`
       EXISTS (
         SELECT 1
         FROM users leave_scope_user
         WHERE leave_scope_user.id = ${leaveAlias}.user_id
-          AND ${getRedSeaUserScopeSql("leave_scope_user")}
+          AND ${userScopeSql}
       )
     `);
   }
@@ -8327,9 +8390,7 @@ app.get("/api/hr/employees", async (req, res) => {
     const userWhereParts = [
       "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
     ];
-    if (getRequestedCompanyScope(req) === "redsea") {
-      userWhereParts.push(getRedSeaUserScopeSql("u"));
-    }
+    addRequestedUserCompanyScope(req, userWhereParts, "u");
 
     const [rows] = await dbPromise.query(
       `
@@ -9104,6 +9165,7 @@ app.get("/api/leads", (req, res) => {
     .toLowerCase()
     .trim();
   const companyScope = getRequestedCompanyScope(req);
+  const leadScopeSql = getCompanyLeadScopeSql(companyScope, "leads");
 
   // 🔥 normalize role
   role = role ? role.toLowerCase().trim() : "";
@@ -9113,9 +9175,7 @@ app.get("/api/leads", (req, res) => {
 
   if (role === "admin") {
     const whereParts = [];
-    if (companyScope === "redsea") {
-      whereParts.push(getRedSeaLeadScopeSql("leads"));
-    }
+    if (leadScopeSql) whereParts.push(leadScopeSql);
     sql = `SELECT * FROM leads${whereParts.length ? ` WHERE ${whereParts.join(" AND ")}` : ""} ORDER BY id ASC`;
   } else if (role === "tme") {
     if (!userId) {
@@ -9149,6 +9209,7 @@ app.get("/api/leads", (req, res) => {
           FROM leads
           WHERE
             created_by = ?
+            ${leadScopeSql ? `AND ${leadScopeSql}` : ""}
             AND
             (assign_emp IS NULL OR TRIM(assign_emp) = '')
             AND (assign_emp_id IS NULL OR assign_emp_id = 0)
@@ -9159,7 +9220,8 @@ app.get("/api/leads", (req, res) => {
         sql = `
           SELECT *
           FROM leads
-          WHERE created_by = ? OR assign_emp = ? OR assign_emp_id = ?
+          WHERE (created_by = ? OR assign_emp = ? OR assign_emp_id = ?)
+            ${leadScopeSql ? `AND ${leadScopeSql}` : ""}
           ORDER BY id DESC
         `;
         values = [userId, employeeName, userId];
@@ -9183,7 +9245,13 @@ app.get("/api/leads", (req, res) => {
         .json({ success: false, message: "User ID required" });
     }
 
-    sql = "SELECT * FROM leads WHERE created_by = ? ORDER BY id DESC";
+    sql = `
+      SELECT *
+      FROM leads
+      WHERE created_by = ?
+        ${leadScopeSql ? `AND ${leadScopeSql}` : ""}
+      ORDER BY id DESC
+    `;
     values = [userId];
   }
 
@@ -9227,9 +9295,11 @@ app.put("/api/leads/:id", async (req, res) => {
   try {
     await ensureLeadAppointmentStatusColumn();
     await ensureLeadSalesTypeColumn();
+    await ensureLeadCompanyScopeColumn();
 
     if (mode === "full") {
       const actionType = data.action_type || data.actionType || "appointment";
+      const companyScope = String(data.company_scope || data.companyScope || "").trim() || null;
       const hasSalesTypeField = Object.prototype.hasOwnProperty.call(data, "sales_type");
       const salesType = hasSalesTypeField
         ? normalizeLeadSalesType(data.sales_type)
@@ -9263,6 +9333,7 @@ app.put("/api/leads/:id", async (req, res) => {
             pincode = ?,
             state = ?,
             maps_lnk = ?,
+            company_scope = COALESCE(?, company_scope),
             source_lead = ?,
             sales_type = COALESCE(?, sales_type),
             industry_type = ?,
@@ -9302,6 +9373,7 @@ app.put("/api/leads/:id", async (req, res) => {
         data.pincode || null,
         data.state || null,
         data.maps_lnk || null,
+        companyScope,
         data.source_lead || null,
         salesType,
         data.industry_type || null,
@@ -9489,6 +9561,7 @@ app.get("/api/appointments", async (req, res) => {
       FROM leads
       WHERE action_type = 'appointment'
         AND created_by = ?
+        ${scopedWhereParts.length ? `AND ${scopedWhereParts.join(" AND ")}` : ""}
       ORDER BY app_date ASC, app_time ASC
     `;
     params = [userId];
@@ -9623,6 +9696,7 @@ app.get("/api/followups", (req, res) => {
       SELECT * FROM leads
       WHERE action_type = 'followup'
       AND created_by = ?
+      ${scopedWhereParts.length ? `AND ${scopedWhereParts.join(" AND ")}` : ""}
       ORDER BY follow_date DESC, follow_time DESC, id DESC
     `;
     params = [userId];
@@ -9983,16 +10057,18 @@ app.get("/api/admin/renewals", async (req, res) => {
 app.get("/api/deals/:id", async (req, res) => {
   try {
     await ensureLeadRenewalSourceColumn();
+    await ensureLeadCompanyScopeColumn();
 
     const ownerScope = await getDealOwnerScope(req.params.id);
     const ownerFilter = buildDealOwnerFilter(ownerScope, "l");
+    const whereParts = ["l.lead_status = 'deal_closed'", ownerFilter.clause];
+    addRequestedLeadCompanyScope(req, whereParts, "l");
     const sql = `
         SELECT
           l.*,
           ${getDealRenewalSelectSql("l")}
         FROM leads l
-        WHERE l.lead_status = 'deal_closed'
-          AND ${ownerFilter.clause}
+        WHERE ${whereParts.join(" AND ")}
         ORDER BY l.closed_date DESC
       `;
 
@@ -11472,9 +11548,7 @@ app.get("/api/admin/attendance", async (req, res) => {
     const userWhereParts = [
       "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
     ];
-    if (getRequestedCompanyScope(req) === "redsea") {
-      userWhereParts.push(getRedSeaUserScopeSql("u"));
-    }
+    addRequestedUserCompanyScope(req, userWhereParts, "u");
 
     const [rows] = await dbPromise.query(
       `
@@ -11614,9 +11688,7 @@ app.get("/api/admin/attendance/location-requests", async (req, res) => {
 
     const filters = ["r.attendance_date = ?", "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'"];
     const params = [attendanceDate];
-    if (getRequestedCompanyScope(req) === "redsea") {
-      filters.push(getRedSeaUserScopeSql("u"));
-    }
+    addRequestedUserCompanyScope(req, filters, "u");
 
     if (roleFilter) {
       filters.push("LOWER(TRIM(COALESCE(u.role, ''))) = ?");
@@ -12267,7 +12339,6 @@ app.get("/api/admin/leaves", async (req, res) => {
 
     const whereClauses = [];
     const params = [];
-    addRequestedLeaveCompanyScope(req, whereClauses, "leave_requests");
     addRequestedLeaveCompanyScope(req, whereClauses, "leave_requests");
 
     if (roleFilter) {
@@ -13224,8 +13295,9 @@ async function getPayrollUsers(filters = {}) {
   ];
   const params = Array.from(PAYROLL_SUPPORTED_ROLES);
 
-  if (companyScope === "redsea") {
-    whereClauses.push(getRedSeaUserScopeSql("users"));
+  const userScopeSql = getCompanyUserScopeSql(companyScope, "users");
+  if (userScopeSql) {
+    whereClauses.push(userScopeSql);
   }
 
   if (roleFilter && PAYROLL_SUPPORTED_ROLES.has(roleFilter)) {
@@ -14872,29 +14944,38 @@ app.get("/api/reports/counts", (req, res) => {
       }
 
       const employeeName = users[0].name;
+      const scopedWhereParts = [];
+      addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+      const scopeAnd = scopedWhereParts.length
+        ? ` AND ${scopedWhereParts.join(" AND ")}`
+        : "";
 
       const leadsSql = `
         SELECT COUNT(*) AS total
         FROM leads
-        WHERE created_by = ? OR assign_emp = ? OR assign_emp_id = ?
+        WHERE (created_by = ? OR assign_emp = ? OR assign_emp_id = ?)
+          ${scopeAnd}
       `;
       const appointmentSql = `
         SELECT COUNT(*) AS total
         FROM leads
         WHERE action_type='appointment'
           AND (created_by = ? OR assign_emp = ? OR assign_emp_id = ?)
+          ${scopeAnd}
       `;
       const followSql = `
         SELECT COUNT(*) AS total
         FROM leads
         WHERE action_type='followup'
           AND (created_by = ? OR assign_emp = ? OR assign_emp_id = ?)
+          ${scopeAnd}
       `;
       const dealsSql = `
         SELECT COUNT(*) AS total
         FROM leads
         WHERE lead_status='deal_closed'
           AND (created_by = ? OR closed_by = ? OR assign_emp = ? OR assign_emp_id = ?)
+          ${scopeAnd}
       `;
 
       db.query(leadsSql, [userId, employeeName, userId], (err0, leads) => {
@@ -14936,11 +15017,16 @@ app.get("/api/reports/counts", (req, res) => {
       });
     });
   } else {
-    leadQuery = "SELECT COUNT(*) AS total FROM leads WHERE created_by = ?";
+    const scopedWhereParts = [];
+    addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+    const scopeAnd = scopedWhereParts.length
+      ? ` AND ${scopedWhereParts.join(" AND ")}`
+      : "";
+    leadQuery = `SELECT COUNT(*) AS total FROM leads WHERE created_by = ?${scopeAnd}`;
     appointmentQuery =
-      "SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment' AND created_by = ?";
+      `SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment' AND created_by = ?${scopeAnd}`;
     followQuery =
-      "SELECT COUNT(*) AS total FROM leads WHERE action_type='followup' AND created_by = ?";
+      `SELECT COUNT(*) AS total FROM leads WHERE action_type='followup' AND created_by = ?${scopeAnd}`;
 
     db.query(leadQuery, [userId], (err, leads) => {
       db.query(appointmentQuery, [userId], (err2, appointments) => {
@@ -15092,9 +15178,7 @@ app.get("/api/available-team", (req, res) => {
   const userWhereParts = [
     "LOWER(TRIM(u.role)) NOT IN ('me', 'tme', 'admin', 'hr', 'accounts')",
   ];
-  if (getRequestedCompanyScope(req) === "redsea") {
-    userWhereParts.push(getRedSeaUserScopeSql("u"));
-  }
+  addRequestedUserCompanyScope(req, userWhereParts, "u");
 
   const sql = `
     SELECT
@@ -15175,9 +15259,7 @@ app.get("/api/admin/team-report", async (req, res) => {
   ];
   const leadJoinScopeParts = [];
 
-  if (getRequestedCompanyScope(req) === "redsea") {
-    userWhereParts.push(getRedSeaUserScopeSql("u"));
-  }
+  addRequestedUserCompanyScope(req, userWhereParts, "u");
   addRequestedLeadCompanyScope(req, leadJoinScopeParts, "l");
 
   const sql = `
