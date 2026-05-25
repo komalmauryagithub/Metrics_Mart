@@ -1,8 +1,21 @@
+function getDeliveryRoleKey() {
+  try {
+    const user = JSON.parse(localStorage.getItem("currentUser") || "null") || {};
+    const role = String(user.role || "").toLowerCase().trim();
+    return role === "smo" ? "smo" : "seo";
+  } catch (_error) {
+    return "seo";
+  }
+}
+
+const deliveryRoleKey = getDeliveryRoleKey();
+const deliveryRoleLabel = deliveryRoleKey.toUpperCase();
+
 window.DASHBOARD_CONFIG = Object.assign({}, window.DASHBOARD_CONFIG || {}, {
-  userLabel: "SEO",
-  reportStorageKey: "seoReportCounts",
-  phaseTrackerDraftsKey: "seoPhaseTrackerDraftsV1",
-  projectsEndpoint: "/api/seo/projects",
+  userLabel: deliveryRoleLabel,
+  reportStorageKey: `${deliveryRoleKey}ReportCounts`,
+  phaseTrackerDraftsKey: `${deliveryRoleKey}PhaseTrackerDraftsV1`,
+  projectsEndpoint: `/api/${deliveryRoleKey}/projects`,
 });
 
 function getSeoTodayDate() {
