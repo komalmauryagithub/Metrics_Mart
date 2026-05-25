@@ -48,6 +48,46 @@
     }
   }
 
+  function patchCompanyScopedFetch() {
+    if (window.fetch?.__companyScopePatched) return;
+
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = function companyScopedFetch(input, init = {}) {
+      const user = getCurrentUser();
+      const isRedSea = getCompanyKey(user) === "redsea";
+      const method = String(init?.method || "GET").toUpperCase();
+
+      if (!isRedSea || !["GET", "HEAD"].includes(method)) {
+        return originalFetch(input, init);
+      }
+
+      const rawUrl = typeof input === "string" || input instanceof URL ? String(input) : "";
+      if (!rawUrl) {
+        return originalFetch(input, init);
+      }
+
+      const url = new URL(rawUrl, window.location.origin);
+      const isSameOrigin = url.origin === window.location.origin;
+      const shouldScope =
+        isSameOrigin &&
+        (url.pathname.startsWith("/api/") || url.pathname === "/test-users");
+
+      if (!shouldScope || url.searchParams.has("companyScope")) {
+        return originalFetch(input, init);
+      }
+
+      url.searchParams.set("companyScope", "redsea");
+      const nextInput = rawUrl.startsWith("http")
+        ? url.toString()
+        : `${url.pathname}${url.search}${url.hash}`;
+
+      return originalFetch(nextInput, init);
+    };
+
+    window.fetch.__companyScopePatched = true;
+  }
+
   function formatStampDate(date) {
     return date.toLocaleString("en-IN", {
       day: "2-digit",
@@ -225,6 +265,7 @@
   }
 
   function initCrmSecurity() {
+    patchCompanyScopedFetch();
     applyCompanyTheme();
     ensureShield();
     buildWatermark();
@@ -239,6 +280,7 @@
   }
 
   if (document.readyState === "loading") {
+    patchCompanyScopedFetch();
     document.addEventListener("DOMContentLoaded", initCrmSecurity);
   } else {
     initCrmSecurity();
