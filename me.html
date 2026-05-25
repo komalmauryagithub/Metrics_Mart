@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" href="logo_.png" />
 
     <link rel="stylesheet" href="attendance-face.css" />
-    <link rel="stylesheet" href="me.css" />
+    <link rel="stylesheet" href="me.css?v=20260524-renewal-status" />
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
@@ -137,7 +137,7 @@
                     </div>
                 </div>
 
-                <div class="target-progress-panel">
+                <div class="target-progress-panel" data-dashboard-section="deals" role="button" tabindex="0">
                     <div class="panel-heading">
                         <h3>Target Progress</h3>
                         <span id="meTargetProgressLabel">0% achieved</span>
@@ -167,6 +167,16 @@
                                     <span>Closed Deals</span>
                                     <strong id="meTargetInsightDeals">0</strong>
                                     <small id="meTargetInsightDealsHint">No closed deals yet</small>
+                                </div>
+                                <div class="target-progress-mini new-sale">
+                                    <span>New Sale</span>
+                                    <strong id="meTargetInsightNewSale">0</strong>
+                                    <small id="meTargetInsightNewSaleHint">Fresh client wins</small>
+                                </div>
+                                <div class="target-progress-mini renewal">
+                                    <span>Renewal</span>
+                                    <strong id="meTargetInsightRenewal">0</strong>
+                                    <small id="meTargetInsightRenewalHint">Repeat client wins</small>
                                 </div>
                             </div>
                         </div>
@@ -222,14 +232,14 @@
                 </div>
 
                 <div class="dashboard-panels">
-                    <div class="dashboard-panel chart-panel">
+                    <div class="dashboard-panel chart-panel" data-dashboard-section="deals" role="button" tabindex="0">
                         <div class="panel-heading">
                             <h3>Performance Overview</h3>
                             <span>This account</span>
                         </div>
                         <canvas id="meDashboardChart"></canvas>
                     </div>
-                    <div class="dashboard-panel funnel-panel-dashboard">
+                    <div class="dashboard-panel funnel-panel-dashboard" data-dashboard-section="appointments" role="button" tabindex="0">
                         <div class="panel-heading">
                             <h3>Sales Funnel</h3>
                             <span id="meDashboardFunnelRate">0% converted</span>
@@ -244,7 +254,7 @@
                     </div>
                 </div>
 
-                <div class="dashboard-panel recent-panel recent-panel-below">
+                <div class="dashboard-panel recent-panel recent-panel-below" data-dashboard-section="deals" role="button" tabindex="0">
                     <div class="panel-heading">
                         <h3>Recent Deals</h3>
                         <button type="button" onclick="showSection('deals')">View Deals</button>
@@ -519,7 +529,7 @@
 
     <div id="meLeadModal" class="modal hidden" onclick="handleMeLeadModalBackdrop(event)">
         <div class="modal-content me-lead-modal-content">
-            <h2>Add Client</h2>
+            <h2 id="meLeadModalTitle">Add Client</h2>
             <form id="meLeadForm" class="me-lead-form">
                 <button type="button" class="me-lead-cancel-btn" onclick="closeMeLeadForm()" title="Cancel" aria-label="Cancel">
                     <i class="fas fa-xmark" aria-hidden="true"></i>
@@ -732,7 +742,7 @@
     <script src="project-tracker.js"></script>
     <script src="payroll-management.js?v=20260524-fixed-commission"></script>
     <script src="attendance-face.js?v=20260523-profile-face"></script>
-    <script src="me.js?v=20260524-fixed-commission"></script>
+    <script src="me.js?v=20260524-renewal-dashboard"></script>
     <script src="attendance-auto-checkout.js"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260523-shift-snipsafe"></script>
