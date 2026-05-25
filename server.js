@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2");
 const multer = require("multer");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -232,9 +232,11 @@ const razorpay = new Razorpay({
 
 const BASE_URL = PUBLIC_APP_URL || LOCAL_BASE_URL;
 const LOCAL_PASSWORD_RESET_COOKIE = "mm_local_password_reset";
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
 const DEFAULT_EMAIL_FROM_NAME = String(
-  process.env.SMTP_FROM_NAME ||
-    process.env.EMAIL_FROM_NAME ||
+  process.env.EMAIL_FROM_NAME ||
     process.env.MAIL_FROM_NAME ||
     process.env.MAILER_FROM_NAME ||
     "Metrics Mart Admin",
@@ -482,14 +484,16 @@ const SALARY_TARGET_MULTIPLIER = 7;
 const AUTO_TARGET_INCENTIVE_ROLES = new Set(["me", "tme"]);
 const SALES_COMMISSION_ROLES = new Set(["me", "tme"]);
 const DEFAULT_SALES_COMMISSION_PERCENT = 10;
-let cachedProfileInviteTransport = null;
-let cachedProfileInviteTransportSignature = "";
 let userRegistrationColumnsReady = false;
 let userRegistrationColumnsPromise = null;
 let attendanceFaceColumnsReady = false;
 let attendanceFaceColumnsPromise = null;
 let userProfileSetupColumnsReady = false;
 let userProfileSetupColumnsPromise = null;
+let leadSalesTypeColumnReady = false;
+let leadSalesTypeColumnPromise = null;
+let leadRenewalSourceColumnReady = false;
+let leadRenewalSourceColumnPromise = null;
 
 async function resolveSalesTargetRole(role, userId) {
   const normalizedRole = String(role || "")
@@ -513,6 +517,112 @@ async function resolveSalesTargetRole(role, userId) {
   return String(rows[0]?.role || "")
     .toLowerCase()
     .trim();
+}
+
+function normalizePositiveId(value) {
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+async function getDealOwnerScope(userId) {
+  const normalizedUserId = normalizePositiveId(userId);
+
+  if (!normalizedUserId) {
+    const error = new Error("User ID required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const [rows] = await dbPromise.query(
+    "SELECT name FROM users WHERE id = ? LIMIT 1",
+    [normalizedUserId],
+  );
+
+  return {
+    userId: normalizedUserId,
+    employeeName: String(rows[0]?.name || "").trim(),
+  };
+}
+
+function buildDealOwnerFilter(scope, alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  const params = [scope.userId, scope.userId, scope.userId];
+  let clause = `(${prefix}created_by = ? OR ${prefix}closed_by = ? OR ${prefix}assign_emp_id = ?`;
+
+  if (scope.employeeName) {
+    clause += ` OR ${prefix}assign_emp = ?`;
+    params.push(scope.employeeName);
+  }
+
+  clause += ")";
+  return { clause, params };
+}
+
+function getDealRenewalMatchCondition(dealAlias = "l", renewalAlias = "rl") {
+  const identityClause = `
+    (
+      (
+        NULLIF(TRIM(COALESCE(${dealAlias}.contact, '')), '') IS NOT NULL
+        AND TRIM(COALESCE(${renewalAlias}.contact, '')) = TRIM(COALESCE(${dealAlias}.contact, ''))
+      )
+      OR (
+        NULLIF(TRIM(COALESCE(${dealAlias}.email, '')), '') IS NOT NULL
+        AND LOWER(TRIM(COALESCE(${renewalAlias}.email, ''))) = LOWER(TRIM(COALESCE(${dealAlias}.email, '')))
+      )
+      OR (
+        NULLIF(TRIM(COALESCE(${dealAlias}.company_name, '')), '') IS NOT NULL
+        AND LOWER(TRIM(COALESCE(${renewalAlias}.company_name, ''))) = LOWER(TRIM(COALESCE(${dealAlias}.company_name, '')))
+        AND LOWER(TRIM(COALESCE(${renewalAlias}.client_name, ''))) = LOWER(TRIM(COALESCE(${dealAlias}.client_name, '')))
+      )
+    )
+  `;
+
+  return `
+    (
+      ${renewalAlias}.renewal_source_lead_id = ${dealAlias}.id
+      OR (
+        ${renewalAlias}.id <> ${dealAlias}.id
+        AND ${renewalAlias}.sales_type = 'renewal'
+        AND COALESCE(${renewalAlias}.created_at, NOW()) >= COALESCE(${dealAlias}.closed_date, ${dealAlias}.created_at)
+        AND ${identityClause}
+      )
+    )
+  `;
+}
+
+function getDealRenewalSelectSql(dealAlias = "l") {
+  const matchCondition = getDealRenewalMatchCondition(dealAlias, "rl");
+  const closedMatchCondition = getDealRenewalMatchCondition(dealAlias, "rcl");
+
+  return `
+    CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM leads rl
+        WHERE ${matchCondition}
+        LIMIT 1
+      ) THEN 1
+      ELSE 0
+    END AS has_renewal,
+    (
+      SELECT COUNT(*)
+      FROM leads rl
+      WHERE ${matchCondition}
+    ) AS renewal_count,
+    (
+      SELECT COUNT(*)
+      FROM leads rcl
+      WHERE ${closedMatchCondition}
+        AND rcl.lead_status = 'deal_closed'
+    ) AS renewal_closed_count
+  `;
+}
+
+function normalizeRenewalLookaheadDays(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 365;
+
+  return Math.min(Math.max(Math.round(numericValue), 0), 3650);
 }
 
 function getAutoSalaryTargetForUser(user) {
@@ -549,24 +659,16 @@ async function getSalesTargetSummaryData({ role, userId, monthKey } = {}) {
   `;
   const params = [monthRange.startDate, monthRange.endDate];
 
-  if (effectiveRole === "me") {
-    if (!normalizedUserId) {
-      const error = new Error("User ID required");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    sql += " AND closed_by = ?";
-    params.push(normalizedUserId);
+  if (effectiveRole === "me" || effectiveRole === "tme") {
+    const ownerScope = await getDealOwnerScope(normalizedUserId);
+    const ownerFilter = buildDealOwnerFilter(ownerScope);
+    sql += ` AND ${ownerFilter.clause}`;
+    params.push(...ownerFilter.params);
   } else if (effectiveRole !== "admin") {
-    if (!normalizedUserId) {
-      const error = new Error("User ID required");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    sql += " AND (created_by = ? OR closed_by = ?)";
-    params.push(normalizedUserId, normalizedUserId);
+    const ownerScope = await getDealOwnerScope(normalizedUserId);
+    const ownerFilter = buildDealOwnerFilter(ownerScope);
+    sql += ` AND ${ownerFilter.clause}`;
+    params.push(...ownerFilter.params);
   }
 
   await ensureUserMonthlyTargetColumn();
@@ -1387,368 +1489,55 @@ function getFirstEmailEnvRawValue(keys) {
   return undefined;
 }
 
-function normalizeMailerPasswordForProvider(password, emailAddress) {
-  const normalizedPassword = String(password || "")
+function isLoopbackAppUrl(value = "") {
+  const host = String(value || "")
     .trim()
-    .replace(/^['"]|['"]$/g, "");
-  const domain = String(emailAddress || "")
-    .trim()
-    .toLowerCase()
-    .split("@")[1] || "";
+    .replace(/^https?:\/\//, "")
+    .split("/")[0]
+    .split(":")[0]
+    .toLowerCase();
 
-  if (["gmail.com", "googlemail.com"].includes(domain)) {
-    return normalizedPassword.replace(/\s+/g, "");
-  }
-
-  return normalizedPassword;
+  return isLoopbackHostValue(host);
 }
 
-function inferProfileInviteMailerPreset(emailAddress) {
-  const normalizedEmail = String(emailAddress || "").trim().toLowerCase();
-  const domain = normalizedEmail.split("@")[1] || "";
-
-  if (!domain) {
-    return null;
-  }
-
-  if (["gmail.com", "googlemail.com"].includes(domain)) {
-    return {
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false,
-    };
-  }
-
-  if (
-    ["outlook.com", "hotmail.com", "live.com", "office365.com", "outlook.in"].includes(domain) ||
-    domain.endsWith(".outlook.com")
-  ) {
-    return {
-      host: "smtp.office365.com",
-      port: 587,
-      secure: false,
-    };
-  }
-
-  if (["zoho.com", "zoho.in"].includes(domain)) {
-    return {
-      host: domain === "zoho.in" ? "smtp.zoho.in" : "smtp.zoho.com",
-      port: 587,
-      secure: false,
-    };
-  }
-
-  return null;
+function getPublicEmailBaseUrl() {
+  const publicUrl = normalizeAppBaseUrl(process.env.PUBLIC_APP_URL || "");
+  if (!publicUrl || isLoopbackAppUrl(publicUrl)) return "";
+  return publicUrl;
 }
 
-function buildProfileInviteMailerSetupMessage(prefix, missingKeys) {
-  const keys = Array.isArray(missingKeys)
-    ? missingKeys.filter((key) => String(key || "").trim())
-    : [];
+function getResendEmailConfig() {
+  const apiKey = getFirstEmailEnvValue(["RESEND_API_KEY"]);
+  const from = getFirstEmailEnvValue(["EMAIL_FROM"]);
+  const publicAppUrl = getPublicEmailBaseUrl();
+  const missingConfig = [
+    !apiKey ? "RESEND_API_KEY" : "",
+    !from ? "EMAIL_FROM" : "",
+    !publicAppUrl ? "PUBLIC_APP_URL" : "",
+  ].filter(Boolean);
 
-  if (!keys.length) {
-    return prefix;
-  }
-
-  return prefix;
+  return {
+    configured: missingConfig.length === 0,
+    apiKey,
+    from,
+    publicAppUrl,
+    missingConfig,
+  };
 }
 
-function buildProfileInviteMailerMissingBaseConfigMessage(missingKeys, hasAuthCredentials) {
-  return buildProfileInviteMailerSetupMessage(
-    "Email service is being configured on the server. The profile form link is ready for manual sharing.",
-    missingKeys,
-  );
-}
-
-function buildPasswordResetMailerMissingConfigMessage(missingKeys) {
-  const keys = Array.isArray(missingKeys)
-    ? missingKeys.filter((key) => String(key || "").trim())
-    : [];
-  const suffix = keys.length
-    ? ` Missing server config: ${keys.join(", ")}.`
+function buildEmailMissingConfigMessage(missingConfig = []) {
+  const suffix = missingConfig.length
+    ? ` Missing server config: ${missingConfig.join(", ")}.`
     : "";
 
-  return `Email service is not configured for password reset OTP yet.${suffix}`;
+  return `Resend email service is not configured.${suffix}`;
 }
 
-function getProfileInviteMailerConfig() {
-  const envHost = getFirstEmailEnvValue([
-    "SMTP_HOST",
-    "EMAIL_HOST",
-    "MAIL_HOST",
-    "MAILER_HOST",
-    "SMTP_SERVER",
-  ]);
-  const envPort = Number(
-    getFirstEmailEnvValue([
-      "SMTP_PORT",
-      "EMAIL_PORT",
-      "MAIL_PORT",
-      "MAILER_PORT",
-    ]) || 0,
-  );
-  const secureEnv = getFirstEmailEnvRawValue([
-    "SMTP_SECURE",
-    "EMAIL_SECURE",
-    "MAIL_SECURE",
-    "MAILER_SECURE",
-  ]);
-  const user = getFirstEmailEnvValue([
-    "SMTP_USER",
-    "SMTP_USERNAME",
-    "SMTP_EMAIL",
-    "SMTP_MAIL",
-    "EMAIL_USER",
-    "EMAIL_USERNAME",
-    "EMAIL_ADDRESS",
-    "EMAIL",
-    "FROM_EMAIL",
-    "SENDER_EMAIL",
-    "MAIL_FROM_ADDRESS",
-    "MAIL_USER",
-    "MAIL_USERNAME",
-    "MAIL_EMAIL",
-    "GMAIL_USER",
-    "GMAIL_EMAIL",
-  ]);
-  const pass = getFirstEmailEnvValue([
-    "SMTP_PASS",
-    "SMTP_PASSWORD",
-    "EMAIL_PASS",
-    "EMAIL_PASSWORD",
-    "EMAIL_APP_PASSWORD",
-    "MAIL_PASS",
-    "MAIL_PASSWORD",
-    "GMAIL_PASS",
-    "GMAIL_PASSWORD",
-    "GMAIL_APP_PASSWORD",
-    "APP_PASSWORD",
-  ]);
-  const fromAddress = getFirstEmailEnvValue([
-    "SMTP_FROM",
-    "SMTP_FROM_EMAIL",
-    "EMAIL_FROM",
-    "EMAIL_FROM_ADDRESS",
-    "FROM_EMAIL",
-    "SENDER_EMAIL",
-    "MAIL_FROM",
-    "MAIL_FROM_ADDRESS",
-    "MAILER_FROM",
-  ]) || user;
-  const inferredPreset = inferProfileInviteMailerPreset(user || fromAddress);
-  const host = String(envHost || inferredPreset?.host || "").trim();
-  const port = Number(envPort || inferredPreset?.port || 0);
-  const fromName = DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
-  const authPassword = normalizeMailerPasswordForProvider(pass, user || fromAddress);
-  const secure = secureEnv != null
-    ? normalizeInviteMailerFlag(secureEnv)
-    : inferredPreset?.secure ?? port === 465;
-  const missingConfig = [];
-
-  if (!host) missingConfig.push("SMTP_HOST");
-  if (!port) missingConfig.push("SMTP_PORT");
-  if (!fromAddress) missingConfig.push("SMTP_FROM");
-
-  if (missingConfig.length) {
-    return {
-      configured: false,
-      reason: buildProfileInviteMailerMissingBaseConfigMessage(
-        missingConfig,
-        Boolean(user || pass),
-      ),
-      missingConfig,
-    };
-  }
-
-  if ((user && !pass) || (!user && pass)) {
-    const missingAuthConfig = [];
-    if (!user) missingAuthConfig.push("SMTP_USER");
-    if (!pass) missingAuthConfig.push("SMTP_PASS");
-
-    return {
-      configured: false,
-      reason: buildProfileInviteMailerSetupMessage(
-        "SMTP username/password is incomplete.",
-        missingAuthConfig,
-      ),
-      missingConfig: missingAuthConfig,
-    };
-  }
-
-  return {
-    configured: true,
-    signature: JSON.stringify([host, port, secure, user, fromAddress, fromName]),
-    transportOptions: {
-      host,
-      port,
-      secure,
-     connectionTimeout: 60000,
-greetingTimeout: 30000,
-socketTimeout: 60000,
-      ...(user
-        ? {
-            auth: {
-              user,
-              pass: authPassword,
-            },
-          }
-        : {}),
-    },
-    from: {
-      name: fromName,
-      address: fromAddress,
-    },
-  };
-}
-
-function getProfileInviteMailerTransport() {
-  const config = getProfileInviteMailerConfig();
-  if (!config.configured) {
-    return {
-      ...config,
-      transport: null,
-    };
-  }
-
-  if (
-    !cachedProfileInviteTransport ||
-    cachedProfileInviteTransportSignature !== config.signature
-  ) {
-    cachedProfileInviteTransport = nodemailer.createTransport(
-      config.transportOptions,
-    );
-    cachedProfileInviteTransportSignature = config.signature;
-  }
-
-  return {
-    ...config,
-    transport: cachedProfileInviteTransport,
-  };
-}
-
-function withProfileMailerTimeouts(options = {}) {
-  return {
-    ...options,
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 8000,
-  };
-}
-
-function getProfileMailerOptionKey(options = {}) {
-  return JSON.stringify([
-    String(options.host || "").toLowerCase(),
-    Number(options.port || 0),
-    Boolean(options.secure),
-  ]);
-}
-
-function addProfileMailerCandidate(candidates, options = {}) {
-  const host = String(options.host || "").trim();
-  const port = Number(options.port || 0);
-  if (!host || !port) return;
-
-  const candidate = withProfileMailerTimeouts({
-    ...options,
-    host,
-    port,
-    secure: Boolean(options.secure),
-  });
-  const key = getProfileMailerOptionKey(candidate);
-  if (candidates.some((item) => getProfileMailerOptionKey(item) === key)) return;
-  candidates.push(candidate);
-}
-
-function getProfileMailerCandidates(mailer = {}) {
-  const baseOptions = mailer.transportOptions || {};
-  const baseHost = String(baseOptions.host || "").trim();
-  const baseAuthUser = String(baseOptions.auth?.user || "").trim();
-  const fromAddress = String(mailer.from?.address || "").trim();
-  const inferredPreset = inferProfileInviteMailerPreset(baseAuthUser || fromAddress);
-  const candidates = [];
-
-  addProfileMailerCandidate(candidates, baseOptions);
-
-  if (inferredPreset) {
-    addProfileMailerCandidate(candidates, {
-      ...baseOptions,
-      host: inferredPreset.host,
-      port: inferredPreset.port,
-      secure: inferredPreset.secure,
-    });
-  }
-
-  if (baseHost) {
-    addProfileMailerCandidate(candidates, {
-      ...baseOptions,
-      host: baseHost,
-      port: 587,
-      secure: false,
-    });
-    addProfileMailerCandidate(candidates, {
-      ...baseOptions,
-      host: baseHost,
-      port: 465,
-      secure: true,
-    });
-    addProfileMailerCandidate(candidates, {
-      ...baseOptions,
-      host: baseHost,
-      port: 2525,
-      secure: false,
-    });
-  }
-
-  return candidates;
-}
-
-function isProfileMailerRetryableError(err) {
-  const errorText = getSmtpErrorText(err);
-  return (
-    errorText.includes("timeout") ||
-    errorText.includes("etimedout") ||
-    errorText.includes("greeting never received") ||
-    errorText.includes("econnrefused") ||
-    errorText.includes("connection refused") ||
-    errorText.includes("ssl") ||
-    errorText.includes("tls") ||
-    errorText.includes("wrong version number") ||
-    errorText.includes("secure")
-  );
-}
-
-async function sendMailWithProfileMailer(mailer, mailOptions) {
-  if (!mailer?.configured || !mailer?.transport) {
-    const error = new Error(mailer?.reason || "SMTP email service is not configured.");
-    error.code = "SMTP_NOT_CONFIGURED";
-    throw error;
-  }
-
-  const candidates = getProfileMailerCandidates(mailer);
-  let lastError = null;
-
-  for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index];
-    const transport = index === 0
-      ? mailer.transport
-      : nodemailer.createTransport(candidate);
-
-    try {
-      return await transport.sendMail(mailOptions);
-    } catch (err) {
-      lastError = err;
-      if (!isProfileMailerRetryableError(err)) {
-        throw err;
-      }
-
-      console.warn(
-        `SMTP send retry ${index + 1}/${candidates.length} failed for ${candidate.host}:${candidate.port} secure=${Boolean(candidate.secure)}:`,
-        err?.code || err?.message || err,
-      );
-    }
-  }
-
-  throw lastError || new Error("SMTP email could not be sent.");
+function createResendConfigError(missingConfig = []) {
+  const error = new Error(buildEmailMissingConfigMessage(missingConfig));
+  error.code = "RESEND_NOT_CONFIGURED";
+  error.missingConfig = missingConfig;
+  return error;
 }
 
 function escapeProfileSetupEmailHtml(value) {
@@ -2175,7 +1964,7 @@ function buildProfileSetupInvitePayload(req, user, token, expiresAt) {
   if (user?.id) {
     invitationParams.set("uid", String(user.id));
   }
-  const invitationLink = `${resolveAppBaseUrl(req)}/complete-profile.html?${invitationParams.toString()}`;
+  const invitationLink = `${getPublicEmailBaseUrl() || resolveAppBaseUrl(req)}/complete-profile.html?${invitationParams.toString()}`;
   const expiresOn = formatProfileSetupExpiryLabel(expiresAt);
   const subject = `Complete your Metrics Mart profile`;
   const bodyLines = [
@@ -2219,71 +2008,80 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
     };
   }
 
-  const inviteHtml = buildProfileSetupInviteHtml(profileSetup, user);
-  const mailer = getProfileInviteMailerTransport();
-  let smtpFailure = null;
-
-  if (mailer.configured && mailer.transport) {
-    try {
-      await sendMailWithProfileMailer(mailer, {
-        from: mailer.from,
-        to: inviteEmail,
+  try {
+    const result = await sendSecondFormLinkEmail(
+      inviteEmail,
+      profileSetup.invitationLink,
+      {
         subject: profileSetup.subject,
         text: profileSetup.body,
-        html: inviteHtml,
-      });
+        html: buildProfileSetupInviteHtml(profileSetup, user),
+      },
+    );
 
-      return {
-        sent: true,
-        status: "sent",
-        provider: "smtp",
-        message: `Profile form email sent successfully to ${inviteEmail}.`,
-      };
-    } catch (err) {
-      console.error("Profile setup SMTP email send failed:", err);
-      smtpFailure = getPasswordResetSmtpFailureDetails(err);
-    }
-  }
-
-  const apiDispatch = await sendEmailViaApi({
-    to: inviteEmail,
-    toName: String(user?.name || "").trim(),
-    subject: profileSetup.subject,
-    text: profileSetup.body,
-    html: inviteHtml,
-  });
-
-  if (apiDispatch.sent) {
     return {
       sent: true,
       status: "sent",
-      provider: apiDispatch.provider || "email-api",
+      provider: "resend",
+      messageId: result?.data?.id || result?.id || "",
       message: `Profile form email sent successfully to ${inviteEmail}.`,
     };
+  } catch (error) {
+    console.error("Second form link email send failed:", error);
+
+    return {
+      sent: false,
+      status: error?.code === "RESEND_NOT_CONFIGURED" ? "not_configured" : "failed",
+      provider: "resend",
+      emailError: String(error?.name || error?.code || "RESEND_SEND_FAILED"),
+      message: "Second form link could not be sent.",
+      missingConfig: Array.isArray(error?.missingConfig) ? error.missingConfig : [],
+    };
+  }
+}
+
+async function sendSecondFormLinkEmail(toEmail, formLink, options = {}) {
+  const config = getResendEmailConfig();
+  if (!config.configured) {
+    throw createResendConfigError(config.missingConfig || []);
   }
 
-  const smtpMessage = smtpFailure
-    ? String(smtpFailure.message || "")
-        .replace(/^OTP email/i, "Profile form email")
-        .replace(/OTP email/gi, "Profile form email")
-    : "";
-  const missingConfig = [
-    ...(Array.isArray(mailer.missingConfig) ? mailer.missingConfig : []),
-    ...(Array.isArray(apiDispatch.missingConfig) ? apiDispatch.missingConfig : []),
-  ];
+  const recipients = normalizeResendRecipients(toEmail);
+  if (!recipients.length) {
+    const error = new Error("Recipient email is missing.");
+    error.code = "RESEND_RECIPIENT_MISSING";
+    throw error;
+  }
 
-  return {
-    sent: false,
-    status: smtpFailure || apiDispatch.status === "failed" ? "failed" : "skipped",
-    provider: apiDispatch.provider || (mailer.configured ? "smtp" : null),
-    smtpError: smtpFailure?.code || apiDispatch.smtpError || null,
-    message:
-      smtpMessage ||
-      apiDispatch.message ||
-      mailer.reason ||
-      "Profile form email could not be sent. Please share the link manually.",
-    missingConfig: [...new Set(missingConfig)],
-  };
+  const normalizedFormLink = String(formLink || "").trim();
+  const subject = String(options.subject || "Complete Your Second Form").trim();
+  const html = String(options.html || `
+      <h2>Complete Your Form</h2>
+      <p>Please click the button below to complete your second form.</p>
+      <a href="${escapeProfileSetupEmailHtml(normalizedFormLink)}" style="display:inline-block;padding:12px 20px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:6px;">
+        Open Second Form
+      </a>
+      <p>If button does not work, copy this link:</p>
+      <p>${escapeProfileSetupEmailHtml(normalizedFormLink)}</p>
+    `);
+  const text = String(options.text || `Complete your second form: ${normalizedFormLink}`);
+
+  const result = await resend.emails.send({
+    from: config.from,
+    to: recipients,
+    subject,
+    html,
+    text,
+  });
+
+  if (result?.error) {
+    const error = new Error(getResendErrorMessage(result.error));
+    error.name = result.error.name || "resend_error";
+    error.code = result.error.statusCode || result.error.name || "RESEND_SEND_FAILED";
+    throw error;
+  }
+
+  return result;
 }
 
 function normalizeProfileSetupEmailValue(value) {
@@ -2531,39 +2329,30 @@ async function sendProfileSetupCompletionEmail(req, profile) {
     };
   }
 
-  const mailer = getProfileInviteMailerTransport();
-  if (!mailer.configured || !mailer.transport) {
-    return {
-      sent: false,
-      status: "skipped",
-      message: "Email service is being configured on the server. Admin and HR can view the completed profile in the panel.",
-      missingConfig: Array.isArray(mailer.missingConfig) ? mailer.missingConfig : [],
-    };
-  }
+  const dispatch = await sendEmailViaApi({
+    to: recipients,
+    subject: `Employee profile submitted: ${formatProfileSetupEmailValue(profile?.name, "Employee")}`,
+    text: buildProfileSetupCompletionText(req, profile),
+    html: buildProfileSetupCompletionHtml(req, profile),
+  });
 
-  try {
-    await sendMailWithProfileMailer(mailer, {
-      from: mailer.from,
-      to: recipients,
-      subject: `Employee profile submitted: ${formatProfileSetupEmailValue(profile?.name, "Employee")}`,
-      text: buildProfileSetupCompletionText(req, profile),
-      html: buildProfileSetupCompletionHtml(req, profile),
-    });
-
+  if (dispatch.sent) {
     return {
       sent: true,
       status: "sent",
       message: "Profile completion notification sent to Admin and HR.",
+      provider: dispatch.provider || "resend",
       recipients,
     };
-  } catch (err) {
-    console.error("Profile setup completion email send failed:", err);
-    return {
-      sent: false,
-      status: "failed",
-      message: "Profile completion notification could not be sent, but the profile details were saved.",
-    };
   }
+
+  return {
+    sent: false,
+    status: dispatch.status || "failed",
+    message: "Profile completion notification could not be sent, but the profile details were saved.",
+    missingConfig: dispatch.missingConfig || [],
+    emailError: dispatch.emailError || null,
+  };
 }
 
 async function issueProfileSetupInvite(req, userId, email, name) {
@@ -2659,7 +2448,7 @@ function buildPasswordResetEmailHtml(resetRequest, user) {
 }
 
 function buildPasswordResetPayload(req, user, token, expiresAt, otpCode, otpExpiresAt) {
-  const resetLink = `${resolveAppBaseUrl(req)}/reset-password.html?token=${encodeURIComponent(token)}`;
+  const resetLink = `${getPublicEmailBaseUrl() || resolveAppBaseUrl(req)}/reset-password.html?token=${encodeURIComponent(token)}`;
   const expiresOn = formatProfileSetupExpiryLabel(expiresAt);
   const otpExpiresOn = formatProfileSetupExpiryLabel(otpExpiresAt);
   const subject = "Your Metrics Mart password reset OTP";
@@ -2694,123 +2483,20 @@ function buildPasswordResetPayload(req, user, token, expiresAt, otpCode, otpExpi
   };
 }
 
-function normalizeEmailApiProvider(value = "") {
-  const provider = String(value || "").trim().toLowerCase();
-  if (["resend", "sendgrid", "brevo"].includes(provider)) return provider;
-  return "";
+function normalizeResendRecipients(value) {
+  return (Array.isArray(value) ? value : [value])
+    .map((email) => String(email || "").trim())
+    .filter(Boolean);
 }
 
-function getEmailApiConfig() {
-  const explicitProvider = normalizeEmailApiProvider(
-    getFirstEmailEnvValue(["EMAIL_API_PROVIDER", "MAIL_API_PROVIDER"]),
-  );
-  const resendApiKey = getFirstEmailEnvValue(["RESEND_API_KEY"]);
-  const brevoApiKey = getFirstEmailEnvValue(["BREVO_API_KEY", "SENDINBLUE_API_KEY"]);
-  const sendGridApiKey = getFirstEmailEnvValue(["SENDGRID_API_KEY"]);
-  const provider =
-    explicitProvider ||
-    (resendApiKey ? "resend" : brevoApiKey ? "brevo" : sendGridApiKey ? "sendgrid" : "");
-  const apiKey =
-    provider === "resend"
-      ? resendApiKey
-      : provider === "brevo"
-        ? brevoApiKey
-        : provider === "sendgrid"
-          ? sendGridApiKey
-          : "";
-  const fromEmail =
-    getFirstEmailEnvValue([
-      "EMAIL_API_FROM",
-      "EMAIL_API_FROM_EMAIL",
-      "RESEND_FROM",
-      "RESEND_FROM_EMAIL",
-      "BREVO_FROM",
-      "BREVO_FROM_EMAIL",
-      "SENDGRID_FROM",
-      "SENDGRID_FROM_EMAIL",
-      "SMTP_FROM",
-      "SMTP_FROM_EMAIL",
-      "EMAIL_FROM",
-      "EMAIL_FROM_ADDRESS",
-      "FROM_EMAIL",
-      "SENDER_EMAIL",
-    ]) || "";
-  const fromName =
-    getFirstEmailEnvValue([
-      "EMAIL_API_FROM_NAME",
-      "RESEND_FROM_NAME",
-      "BREVO_FROM_NAME",
-      "SENDGRID_FROM_NAME",
-      "SMTP_FROM_NAME",
-      "EMAIL_FROM_NAME",
-    ]) || DEFAULT_EMAIL_FROM_NAME || "Metrics Mart Admin";
-
-  if (!provider || !apiKey || !fromEmail) {
-    return {
-      configured: false,
-      provider,
-      missingConfig: [
-        !provider ? "EMAIL_API_PROVIDER or provider API key" : "",
-        !apiKey ? `${(provider || "EMAIL_API").toUpperCase()}_API_KEY` : "",
-        !fromEmail ? "EMAIL_API_FROM" : "",
-      ].filter(Boolean),
-    };
-  }
-
-  return {
-    configured: true,
-    provider,
-    apiKey,
-    fromEmail,
-    fromName,
-  };
-}
-
-function getEmailApiEndpoint(provider) {
-  if (provider === "resend") {
-    return getFirstEmailEnvValue(["RESEND_API_URL"]) || "https://api.resend.com/emails";
-  }
-
-  if (provider === "brevo") {
-    return getFirstEmailEnvValue(["BREVO_API_URL", "SENDINBLUE_API_URL"]) ||
-      "https://api.brevo.com/v3/smtp/email";
-  }
-
-  if (provider === "sendgrid") {
-    return getFirstEmailEnvValue(["SENDGRID_API_URL"]) ||
-      "https://api.sendgrid.com/v3/mail/send";
-  }
-
-  return "";
-}
-
-function getEmailApiProviderLabel(provider) {
-  if (provider === "resend") return "Resend";
-  if (provider === "brevo") return "Brevo";
-  if (provider === "sendgrid") return "SendGrid";
-  return "Email API";
-}
-
-function splitEmailAddressAndName(value, fallbackName = "") {
-  const rawValue = String(value || "").trim();
-  const match = rawValue.match(/^(.*?)<([^>]+)>$/);
-  if (match) {
-    return {
-      name: String(match[1] || "").replace(/^['"]|['"]$/g, "").trim() || fallbackName,
-      email: String(match[2] || "").trim(),
-    };
-  }
-
-  return {
-    name: fallbackName,
-    email: rawValue,
-  };
-}
-
-function buildFriendlyFromAddress(email, name) {
-  const parsed = splitEmailAddressAndName(email, name);
-  if (!parsed.email) return "";
-  return parsed.name ? `${parsed.name} <${parsed.email}>` : parsed.email;
+function getResendErrorMessage(error) {
+  const rawMessage =
+    error?.message ||
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    error?.error?.message ||
+    "";
+  return String(rawMessage || "Resend email request failed.").trim();
 }
 
 function getFirstEnvValue(keys = []) {
@@ -2976,102 +2662,6 @@ function postJsonViaHttps(url, headers, payload, timeoutMs = 25000) {
   });
 }
 
-function buildEmailApiPayload(config, message) {
-  const toEmail = String(message?.to || "").trim();
-  const toName = String(message?.toName || "").trim();
-  const subject = String(message?.subject || "").trim();
-  const text = String(message?.text || "").trim();
-  const html = String(message?.html || "").trim();
-  const from = splitEmailAddressAndName(config.fromEmail, config.fromName);
-  const attachments = normalizeEmailApiAttachments(message?.attachments);
-
-  if (config.provider === "resend") {
-    const payload = {
-      from: buildFriendlyFromAddress(config.fromEmail, config.fromName),
-      to: [toEmail],
-      subject,
-      text,
-      html,
-    };
-
-    if (attachments.length) {
-      payload.attachments = attachments.map((attachment) => ({
-        filename: attachment.filename,
-        content: attachment.contentBase64,
-      }));
-    }
-
-    return payload;
-  }
-
-  if (config.provider === "brevo") {
-    const payload = {
-      sender: {
-        name: from.name || config.fromName,
-        email: from.email,
-      },
-      to: [
-        {
-          email: toEmail,
-          ...(toName ? { name: toName } : {}),
-        },
-      ],
-      subject,
-      htmlContent: html,
-      textContent: text,
-    };
-
-    if (attachments.length) {
-      payload.attachment = attachments.map((attachment) => ({
-        name: attachment.filename,
-        content: attachment.contentBase64,
-      }));
-    }
-
-    return payload;
-  }
-
-  const payload = {
-    personalizations: [
-      {
-        to: [
-          {
-            email: toEmail,
-            ...(toName ? { name: toName } : {}),
-          },
-        ],
-        subject,
-      },
-    ],
-    from: {
-      email: from.email,
-      ...(from.name ? { name: from.name } : {}),
-    },
-    subject,
-    content: [
-      {
-        type: "text/plain",
-        value: text || subject,
-      },
-      {
-        type: "text/html",
-        value: html || text || subject,
-      },
-    ],
-  };
-
-  if (attachments.length) {
-    payload.attachments = attachments.map((attachment) => ({
-      content: attachment.contentBase64,
-      filename: attachment.filename,
-      type: attachment.contentType,
-      disposition: "attachment",
-    }));
-  }
-
-  return payload;
-}
-
 function normalizeEmailApiAttachments(value) {
   const source = Array.isArray(value) ? value : [];
 
@@ -3106,194 +2696,70 @@ function normalizeEmailApiAttachments(value) {
     .filter(Boolean);
 }
 
-function buildEmailApiHeaders(config) {
-  if (config.provider === "resend") {
-    return {
-      Authorization: `Bearer ${config.apiKey}`,
-    };
-  }
-
-  if (config.provider === "brevo") {
-    return {
-      accept: "application/json",
-      "api-key": config.apiKey,
-    };
-  }
-
-  return {
-    Authorization: `Bearer ${config.apiKey}`,
-  };
-}
-
-function getEmailApiErrorMessage(provider, error) {
-  const providerLabel = getEmailApiProviderLabel(provider);
-  const statusCode = Number(error?.statusCode || 0);
-  const responseJson = error?.responseJson || {};
-  const responseText = String(error?.responseBody || error?.message || "").slice(0, 240);
-  const message =
-    responseJson.message ||
-    responseJson.error ||
-    (Array.isArray(responseJson.errors) && responseJson.errors[0]?.message) ||
-    responseText;
-
-  if (statusCode === 401 || statusCode === 403) {
-    return `${providerLabel} API key was rejected. Check the API key in live server env.`;
-  }
-
-  if (statusCode === 400 || statusCode === 422) {
-    return `${providerLabel} rejected the email request. Check verified sender/domain and EMAIL_API_FROM. ${message || ""}`.trim();
-  }
-
-  if (String(error?.code || "").includes("TIMEOUT")) {
-    return `${providerLabel} API timed out. Please retry or check provider status.`;
-  }
-
-  return `${providerLabel} email API failed. ${message || "Check provider settings."}`.trim();
-}
-
 async function sendEmailViaApi(message) {
-  const config = getEmailApiConfig();
+  const config = getResendEmailConfig();
   if (!config.configured) {
+    console.error("Resend email config missing:", config.missingConfig);
     return {
       sent: false,
       status: "not_configured",
       missingConfig: config.missingConfig || [],
-      message: "Email API is not configured.",
+      message: buildEmailMissingConfigMessage(config.missingConfig || []),
+    };
+  }
+
+  const recipients = normalizeResendRecipients(message?.to);
+  if (!recipients.length) {
+    return {
+      sent: false,
+      status: "skipped",
+      provider: "resend",
+      message: "Recipient email is missing.",
     };
   }
 
   try {
-    const endpoint = getEmailApiEndpoint(config.provider);
-    const result = await postJsonViaHttps(
-      endpoint,
-      buildEmailApiHeaders(config),
-      buildEmailApiPayload(config, message),
-    );
+    const payload = {
+      from: config.from,
+      to: recipients,
+      subject: String(message?.subject || "").trim(),
+      text: String(message?.text || "").trim() || undefined,
+      html: String(message?.html || "").trim() || undefined,
+    };
+    const attachments = normalizeEmailApiAttachments(message?.attachments);
+
+    if (attachments.length) {
+      payload.attachments = attachments.map((attachment) => ({
+        filename: attachment.filename,
+        content: attachment.contentBase64,
+      }));
+    }
+
+    const result = await resend.emails.send(payload);
+    if (result?.error) {
+      const error = new Error(getResendErrorMessage(result.error));
+      error.name = result.error.name || "resend_error";
+      error.code = result.error.statusCode || result.error.name || "RESEND_SEND_FAILED";
+      throw error;
+    }
 
     return {
       sent: true,
       status: "sent",
-      provider: config.provider,
-      messageId:
-        result.json?.id ||
-        result.json?.messageId ||
-        result.json?.message_id ||
-        "",
-      message: `${getEmailApiProviderLabel(config.provider)} email sent successfully.`,
+      provider: "resend",
+      messageId: result?.data?.id || result?.id || "",
+      message: "Resend email sent successfully.",
     };
   } catch (error) {
-    console.error(`${getEmailApiProviderLabel(config.provider)} email API failed:`, error);
+    console.error("Resend email send failed:", error);
     return {
       sent: false,
       status: "failed",
-      provider: config.provider,
-      smtpError: `EMAIL_API_${String(error?.statusCode || error?.code || "FAILED").toUpperCase()}`,
-      message: getEmailApiErrorMessage(config.provider, error),
+      provider: "resend",
+      emailError: String(error?.name || error?.code || "RESEND_SEND_FAILED"),
+      message: getResendErrorMessage(error),
     };
   }
-}
-
-function getSmtpErrorText(err) {
-  return [
-    err?.code,
-    err?.command,
-    err?.responseCode,
-    err?.response,
-    err?.message,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function getPasswordResetSmtpFailureDetails(err) {
-  const errorText = getSmtpErrorText(err);
-  const code = String(
-    err?.code || err?.responseCode || err?.command || "SMTP_SEND_FAILED",
-  ).trim();
-
-  if (
-    errorText.includes("eauth") ||
-    errorText.includes("535") ||
-    errorText.includes("invalid login") ||
-    errorText.includes("authentication") ||
-    errorText.includes("username and password")
-  ) {
-    return {
-      code,
-      message:
-        "OTP email login failed. Check SMTP_USER and use the mailbox app password in SMTP_PASS.",
-    };
-  }
-
-  if (
-    errorText.includes("enotfound") ||
-    errorText.includes("dns") ||
-    errorText.includes("getaddrinfo")
-  ) {
-    return {
-      code,
-      message:
-        "SMTP host was not found. Check SMTP_HOST on the live server.",
-    };
-  }
-
-  if (
-    errorText.includes("etimedout") ||
-    errorText.includes("timeout") ||
-    errorText.includes("greeting never received")
-  ) {
-    return {
-      code,
-      message:
-        "SMTP connection timed out. Check SMTP_HOST, SMTP_PORT, and whether the live server can connect to SMTP.",
-    };
-  }
-
-  if (
-    errorText.includes("econnrefused") ||
-    errorText.includes("connection refused")
-  ) {
-    return {
-      code,
-      message:
-        "SMTP connection was refused. Check SMTP_HOST and SMTP_PORT on the live server.",
-    };
-  }
-
-  if (
-    errorText.includes("ssl") ||
-    errorText.includes("tls") ||
-    errorText.includes("wrong version number") ||
-    errorText.includes("secure")
-  ) {
-    return {
-      code,
-      message:
-        "SMTP secure/port setting is mismatched. For Gmail use SMTP_PORT=587 and SMTP_SECURE=false.",
-    };
-  }
-
-  if (
-    errorText.includes("550") ||
-    errorText.includes("553") ||
-    errorText.includes("sender") ||
-    errorText.includes("from")
-  ) {
-    return {
-      code,
-      message:
-        "SMTP sender was rejected. Keep SMTP_FROM the same email as SMTP_USER.",
-    };
-  }
-
-  return {
-    code,
-    message:
-      code && code !== "SMTP_SEND_FAILED"
-        ? `OTP email could not be sent. SMTP error: ${code}. Check live server SMTP settings.`
-        : "OTP email could not be sent. Please check SMTP settings on the live server.",
-  };
 }
 
 async function sendPasswordResetEmail(resetRequest, user) {
@@ -3306,7 +2772,6 @@ async function sendPasswordResetEmail(resetRequest, user) {
     };
   }
 
-  const mailer = getProfileInviteMailerTransport();
   const apiDispatch = await sendEmailViaApi({
     to: inviteEmail,
     toName: String(user?.name || "").trim(),
@@ -3315,48 +2780,16 @@ async function sendPasswordResetEmail(resetRequest, user) {
     html: buildPasswordResetEmailHtml(resetRequest, user),
   });
 
-  if (apiDispatch.sent || apiDispatch.status === "failed") {
-    return apiDispatch;
-  }
-
-  if (!mailer.configured || !mailer.transport) {
-    const missingConfig = Array.isArray(mailer.missingConfig)
-      ? mailer.missingConfig
-      : [];
-
-    return {
-      sent: false,
-      status: "skipped",
-      message: buildPasswordResetMailerMissingConfigMessage(missingConfig),
-      missingConfig,
-    };
-  }
-
-  try {
-    await sendMailWithProfileMailer(mailer, {
-      from: mailer.from,
-      to: inviteEmail,
-      subject: resetRequest.subject,
-      text: resetRequest.body,
-      html: buildPasswordResetEmailHtml(resetRequest, user),
-    });
-
+  if (apiDispatch.sent) {
     return {
       sent: true,
       status: "sent",
+      provider: "resend",
       message: `Password reset email sent automatically to ${inviteEmail}.`,
     };
-  } catch (err) {
-    console.error("Password reset email send failed:", err);
-    const smtpFailure = getPasswordResetSmtpFailureDetails(err);
-
-    return {
-      sent: false,
-      status: "failed",
-      message: smtpFailure.message,
-      smtpError: smtpFailure.code,
-    };
   }
+
+  return apiDispatch;
 }
 
 async function issuePasswordResetRequest(req, user) {
@@ -4968,20 +4401,60 @@ ensureLeadAppointmentStatusColumn().catch((err) => {
 });
 
 async function ensureLeadSalesTypeColumn() {
-  await runSchemaChange(
-    "ALTER TABLE leads ADD COLUMN sales_type varchar(20) NOT NULL DEFAULT 'new' AFTER source_lead",
-    "ER_DUP_FIELDNAME",
-  );
+  if (leadSalesTypeColumnReady) return;
+  if (leadSalesTypeColumnPromise) return leadSalesTypeColumnPromise;
 
-  await dbPromise.query(`
-    UPDATE leads
-    SET sales_type = 'new'
-    WHERE sales_type IS NULL OR TRIM(sales_type) = ''
-  `);
+  leadSalesTypeColumnPromise = (async () => {
+    await runSchemaChange(
+      "ALTER TABLE leads ADD COLUMN sales_type varchar(20) NOT NULL DEFAULT 'new' AFTER source_lead",
+      "ER_DUP_FIELDNAME",
+    );
+
+    await dbPromise.query(`
+      UPDATE leads
+      SET sales_type = 'new'
+      WHERE sales_type IS NULL OR TRIM(sales_type) = ''
+    `);
+    leadSalesTypeColumnReady = true;
+  })();
+
+  try {
+    return await leadSalesTypeColumnPromise;
+  } finally {
+    if (!leadSalesTypeColumnReady) {
+      leadSalesTypeColumnPromise = null;
+    }
+  }
 }
 
 ensureLeadSalesTypeColumn().catch((err) => {
   console.error("Lead sales type schema setup failed:", err);
+});
+
+async function ensureLeadRenewalSourceColumn() {
+  if (leadRenewalSourceColumnReady) return;
+  if (leadRenewalSourceColumnPromise) return leadRenewalSourceColumnPromise;
+
+  leadRenewalSourceColumnPromise = (async () => {
+    await ensureLeadSalesTypeColumn();
+    await runSchemaChange(
+      "ALTER TABLE leads ADD COLUMN renewal_source_lead_id int DEFAULT NULL AFTER sales_type",
+      "ER_DUP_FIELDNAME",
+    );
+    leadRenewalSourceColumnReady = true;
+  })();
+
+  try {
+    return await leadRenewalSourceColumnPromise;
+  } finally {
+    if (!leadRenewalSourceColumnReady) {
+      leadRenewalSourceColumnPromise = null;
+    }
+  }
+}
+
+ensureLeadRenewalSourceColumn().catch((err) => {
+  console.error("Lead renewal source setup failed:", err);
 });
 
 async function ensureUserMonthlyTargetColumn() {
@@ -8150,7 +7623,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         missingConfig: Array.isArray(emailDispatch.missingConfig)
           ? emailDispatch.missingConfig
           : [],
-        smtpError: emailDispatch.smtpError || null,
+        emailError: emailDispatch.emailError || null,
       });
     }
 
@@ -9268,6 +8741,10 @@ app.get("/api/me/:id", async (req, res) => {
 app.post("/api/leads", async (req, res) => {
   const data = req.body || {};
   const salesType = normalizeLeadSalesType(data.sales_type);
+  const renewalSourceLeadId =
+    salesType === "renewal"
+      ? normalizePositiveId(data.renewal_source_lead_id || data.renewalSourceLeadId)
+      : 0;
   const hasAppointmentDate = Boolean(data.app_date);
   const appointmentStatus = hasAppointmentDate
     ? normalizeAppointmentStatus(data.appointment_status, "generated")
@@ -9278,7 +8755,7 @@ app.post("/api/leads", async (req, res) => {
         company_name, client_name, contact, alternate_contact,
         telephone, email, gst_no,
         flat_no, building_name, locality, city, pincode, state, maps_lnk,
-        source_lead, sales_type, industry_type,
+        source_lead, sales_type, renewal_source_lead_id, industry_type,
         web_type, seo_type, smo_type, app_type, erp_type, services,
         service_notes,
         action_type, appointment_status,
@@ -9286,7 +8763,7 @@ app.post("/api/leads", async (req, res) => {
         follow_date, follow_time, reason,
         additional_notes,
         created_by 
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
   const values = [
@@ -9306,6 +8783,7 @@ app.post("/api/leads", async (req, res) => {
     data.maps_lnk || null,
     data.source_lead || null,
     salesType,
+    renewalSourceLeadId || null,
     data.industry_type || null,
     JSON.stringify(data.web_type || []),
     JSON.stringify(data.seo_type || []),
@@ -9330,7 +8808,7 @@ app.post("/api/leads", async (req, res) => {
 
   try {
     await ensureLeadAppointmentStatusColumn();
-    await ensureLeadSalesTypeColumn();
+    await ensureLeadRenewalSourceColumn();
     const [result] = await dbPromise.query(sql, values);
     const whatsapp = data.notify_whatsapp
       ? await buildLeadWhatsappPayload(data, "create")
@@ -10117,73 +9595,175 @@ app.put(
   },
 );
 
-// ====================== GET DEALS FOR EMPLOYEE ======================
-app.get("/api/deals/:id", (req, res) => {
-  const userId = req.params.id;
+app.get("/api/admin/renewals", async (req, res) => {
+  try {
+    await ensureLeadRenewalSourceColumn();
 
-  const nameSql = `SELECT name FROM users WHERE id = ? AND LOWER(role) = 'me'`;
-  db.query(nameSql, [userId], (err, userResult) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ success: false });
-    }
-
-    if (userResult.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
-
-    const employeeName = userResult[0].name;
+    const lookaheadDays = normalizeRenewalLookaheadDays(req.query.days);
+    const renewalDueDateSql = "DATE_ADD(DATE(l.closed_date), INTERVAL 1 YEAR)";
+    const closedRenewalMatchCondition = getDealRenewalMatchCondition("l", "rcl");
 
     const sql = `
-        SELECT * FROM leads
-        WHERE lead_status = 'deal_closed'
-        AND closed_by = ?
-        ORDER BY closed_date DESC
-      `;
+      SELECT
+        l.id,
+        l.company_name,
+        l.client_name,
+        l.contact,
+        l.email,
+        l.city,
+        l.services,
+        l.service_notes,
+        l.web_type,
+        l.seo_type,
+        l.smo_type,
+        l.app_type,
+        l.erp_type,
+        l.deal_amount,
+        l.payment_method,
+        l.pay_stat,
+        l.sales_type,
+        l.assign_emp,
+        DATE_FORMAT(DATE(l.closed_date), '%Y-%m-%d') AS closed_date,
+        DATE_FORMAT(${renewalDueDateSql}, '%Y-%m-%d') AS renewal_due_date,
+        DATEDIFF(${renewalDueDateSql}, CURDATE()) AS days_left,
+        COALESCE(NULLIF(l.assign_emp, ''), closer.name, creator.name, '') AS owner_name,
+        ${getDealRenewalSelectSql("l")}
+      FROM leads l
+      LEFT JOIN users closer ON closer.id = l.closed_by
+      LEFT JOIN users creator ON creator.id = l.created_by
+      WHERE l.lead_status = 'deal_closed'
+        AND l.closed_date IS NOT NULL
+        AND ${renewalDueDateSql} <= DATE_ADD(CURDATE(), INTERVAL ${lookaheadDays} DAY)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM leads rcl
+          WHERE ${closedRenewalMatchCondition}
+            AND rcl.lead_status = 'deal_closed'
+          LIMIT 1
+        )
+      ORDER BY ${renewalDueDateSql} ASC, l.closed_date DESC, l.id DESC
+    `;
 
-    db.query(sql, [userId], (err, result) => {
-      if (err) {
-        console.error("Deals Fetch Error:", err);
-        return res.status(500).json({ success: false });
-      }
-      res.json({ success: true, data: result });
+    const [rows] = await dbPromise.query(sql);
+    const summary = rows.reduce(
+      (totals, row) => {
+        const daysLeft = Number(row.days_left);
+        const renewalCount = Number(row.renewal_count || 0);
+
+        totals.total += 1;
+        if (renewalCount > 0) {
+          totals.started += 1;
+        } else if (Number.isFinite(daysLeft) && daysLeft < 0) {
+          totals.overdue += 1;
+        } else if (Number.isFinite(daysLeft) && daysLeft <= 30) {
+          totals.dueSoon += 1;
+        } else {
+          totals.upcoming += 1;
+        }
+
+        return totals;
+      },
+      {
+        total: 0,
+        overdue: 0,
+        dueSoon: 0,
+        upcoming: 0,
+        started: 0,
+      },
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      summary,
+      lookaheadDays,
     });
-  });
+  } catch (err) {
+    console.error("Admin Renewals Fetch Error:", err);
+    res.status(500).json({
+      success: false,
+      data: [],
+      summary: {
+        total: 0,
+        overdue: 0,
+        dueSoon: 0,
+        upcoming: 0,
+        started: 0,
+      },
+      message: "Failed to load renewal details",
+    });
+  }
 });
 
-app.get("/api/deals", (req, res) => {
-  const { userId, role } = req.query;
+// ====================== GET DEALS FOR EMPLOYEE ======================
+app.get("/api/deals/:id", async (req, res) => {
+  try {
+    await ensureLeadRenewalSourceColumn();
 
-  let sql;
-  let values = [];
+    const ownerScope = await getDealOwnerScope(req.params.id);
+    const ownerFilter = buildDealOwnerFilter(ownerScope, "l");
+    const sql = `
+        SELECT
+          l.*,
+          ${getDealRenewalSelectSql("l")}
+        FROM leads l
+        WHERE l.lead_status = 'deal_closed'
+          AND ${ownerFilter.clause}
+        ORDER BY l.closed_date DESC
+      `;
 
-  if (role === "admin" || role === "accounts") {
-    sql = `
-        SELECT * FROM leads
-        WHERE lead_status = 'deal_closed'
-        ORDER BY closed_date DESC
-      `;
-  } else {
-    sql = `
-        SELECT * FROM leads
-        WHERE lead_status = 'deal_closed'
-        AND (created_by = ? OR closed_by = ?)
-        ORDER BY closed_date DESC
-      `;
-    values = [userId, userId];
+    const [result] = await dbPromise.query(sql, ownerFilter.params);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("Deals Fetch Error:", err);
+    res.status(err.statusCode || 500).json({
+      success: false,
+      data: [],
+      message: err.message || "Failed to load deals",
+    });
   }
+});
 
-  db.query(sql, values, (err, result) => {
-    if (err) {
-      console.error(err);
-      return res.json({ success: false, data: [] });
+app.get("/api/deals", async (req, res) => {
+  try {
+    await ensureLeadRenewalSourceColumn();
+
+    const role = String(req.query.role || "")
+      .toLowerCase()
+      .trim();
+    const values = [];
+    const whereParts = ["l.lead_status = 'deal_closed'"];
+
+    if (role !== "admin" && role !== "accounts") {
+      const ownerScope = await getDealOwnerScope(req.query.userId);
+      const ownerFilter = buildDealOwnerFilter(ownerScope, "l");
+      whereParts.push(ownerFilter.clause);
+      values.push(...ownerFilter.params);
     }
+
+    const sql = `
+        SELECT
+          l.*,
+          ${getDealRenewalSelectSql("l")}
+        FROM leads l
+        WHERE ${whereParts.join(" AND ")}
+        ORDER BY l.closed_date DESC
+      `;
+
+    const [result] = await dbPromise.query(sql, values);
 
     return res.json({
       success: true,
       data: result,
     });
-  });
+  } catch (err) {
+    console.error("Deals Fetch Error:", err);
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      data: [],
+      message: err.message || "Failed to load deals",
+    });
+  }
 });
 
 app.get("/api/deal-products", (req, res) => {
@@ -14981,7 +14561,8 @@ app.get("/api/reports/counts", (req, res) => {
       const dealsSql = `
         SELECT COUNT(*) AS total
         FROM leads
-        WHERE lead_status='deal_closed' AND closed_by = ?
+        WHERE lead_status='deal_closed'
+          AND (created_by = ? OR closed_by = ? OR assign_emp = ? OR assign_emp_id = ?)
       `;
 
       db.query(leadsSql, [userId, employeeName, userId], (err0, leads) => {
@@ -15002,7 +14583,7 @@ app.get("/api/reports/counts", (req, res) => {
               return res.status(500).json({ success: false });
             }
 
-            db.query(dealsSql, [userId], (err3, deals) => {
+            db.query(dealsSql, [userId, userId, employeeName, userId], (err3, deals) => {
               if (err3) {
                 console.error(`${normalizedRole.toUpperCase()} Deals Report Error:`, err3);
                 return res.status(500).json({ success: false });
@@ -17162,16 +16743,6 @@ app.post("/api/invoices/send-email", async (req, res) => {
     });
   }
 
-  const mailer = getProfileInviteMailerTransport();
-  if (!mailer.configured || !mailer.transport) {
-    return res.status(503).json({
-      success: false,
-      message:
-        mailer.reason ||
-        "Automatic email is not configured on the server yet. Please add SMTP settings first.",
-    });
-  }
-
   try {
     const [rows] = await dbPromise.query(
       `
@@ -17231,8 +16802,7 @@ app.post("/api/invoices/send-email", async (req, res) => {
       </div>
     `;
 
-    await sendMailWithProfileMailer(mailer, {
-      from: mailer.from,
+    const emailDispatch = await sendEmailViaApi({
       to: toEmail,
       subject,
       text: plainText,
@@ -17246,9 +16816,19 @@ app.post("/api/invoices/send-email", async (req, res) => {
       ],
     });
 
+    if (!emailDispatch.sent) {
+      return res.status(503).json({
+        success: false,
+        message: emailDispatch.message || "Invoice email could not be sent.",
+        missingConfig: emailDispatch.missingConfig || [],
+        emailError: emailDispatch.emailError || null,
+      });
+    }
+
     return res.json({
       success: true,
       message: `${invoiceLabel} PDF emailed successfully to ${toEmail}.`,
+      provider: "resend",
     });
   } catch (error) {
     console.error("Invoice email send failed:", error);
@@ -17752,33 +17332,11 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
       });
     }
 
-    const mailer = getProfileInviteMailerTransport();
-    if (!mailer.configured || !mailer.transport) {
-      return res.status(503).json({
-        success: false,
-        message:
-          apiDispatch.status === "failed"
-            ? apiDispatch.message
-            : mailer.reason ||
-              "Email service is not configured. Add EMAIL_API_PROVIDER, provider API key, and EMAIL_API_FROM on the live server.",
-        smtpError: apiDispatch.smtpError || null,
-        missingConfig: apiDispatch.missingConfig || mailer.missingConfig || [],
-      });
-    }
-
-    await sendMailWithProfileMailer(mailer, {
-      from: mailer.from,
-      to: toEmail,
-      subject,
-      text,
-      html,
-      attachments,
-    });
-
-    return res.json({
-      success: true,
-      message: `Proposal PDF emailed successfully to ${toEmail}.`,
-      provider: "smtp",
+    return res.status(503).json({
+      success: false,
+      message: apiDispatch.message || "Proposal email could not be sent.",
+      emailError: apiDispatch.emailError || null,
+      missingConfig: apiDispatch.missingConfig || [],
     });
   } catch (error) {
     console.error("Proposal email send failed:", error);
