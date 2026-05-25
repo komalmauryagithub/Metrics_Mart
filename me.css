@@ -2342,3 +2342,142 @@ body {
         flex-direction: column;
     }
 }
+
+[data-dashboard-section] {
+    cursor: pointer;
+}
+
+[data-dashboard-section]:focus-visible {
+    outline: 3px solid rgba(14, 165, 233, 0.35);
+    outline-offset: 3px;
+}
+
+.btn-renewal {
+    align-items: center;
+    background: #0f766e;
+    border: 0;
+    border-radius: 8px;
+    color: #ffffff;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 13px;
+    font-weight: 700;
+    gap: 6px;
+    justify-content: center;
+    min-height: 34px;
+    padding: 8px 12px;
+    white-space: nowrap;
+}
+
+.btn-renewal:hover,
+.btn-renewal:focus {
+    background: #115e59;
+}
+
+.btn-renewal.is-started {
+    background: #d97706;
+}
+
+.btn-renewal.is-started:hover,
+.btn-renewal.is-started:focus {
+    background: #b45309;
+}
+
+.btn-renewal.is-renewed {
+    background: #16a34a;
+}
+
+.btn-renewal.is-renewed:hover,
+.btn-renewal.is-renewed:focus {
+    background: #15803d;
+}
+
+@media (max-width: 1180px) {
+    .sales-target-strip,
+    .dashboard-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .target-progress-layout,
+    .dashboard-panels {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .header,
+    .header-right,
+    .dashboard-title-row,
+    .sales-target-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .dashboard-container {
+        display: block;
+    }
+
+    .sidebar {
+        border-bottom: 1px solid #e2e8f0;
+        border-right: 0;
+        overflow-x: auto;
+        padding: 10px 0;
+        width: 100%;
+    }
+
+    .sidebar ul {
+        display: flex;
+        gap: 6px;
+        min-width: max-content;
+        padding: 0 10px;
+    }
+
+    .sidebar li {
+        border-radius: 8px;
+        font-size: 14px;
+        padding: 10px 12px;
+        white-space: nowrap;
+    }
+
+    .main-content {
+        padding: 16px;
+    }
+
+    .sales-target-strip,
+    .dashboard-metrics,
+    .target-progress-mini-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sales-target-card,
+    .metric-card,
+    .target-progress-mini {
+        min-width: 0;
+    }
+
+    .target-chart-shell {
+        min-height: 230px;
+    }
+
+    .admin-funnel .funnel-row,
+    .funnel-row {
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .brand-logo {
+        width: 170px !important;
+    }
+
+    .sales-target-card strong,
+    .metric-card strong,
+    .target-progress-callout strong {
+        font-size: 24px;
+        overflow-wrap: anywhere;
+    }
+
+    .target-set-btn {
+        width: 100%;
+    }
+}
