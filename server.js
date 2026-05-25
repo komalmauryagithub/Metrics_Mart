@@ -924,12 +924,32 @@ app.use(express.static(__dirname));
 
 // ====================== MULTER SETUP ======================
 const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
+function ensureUploadDirectory(directoryPath) {
+  if (!fs.existsSync(directoryPath)) {
+    fs.mkdirSync(directoryPath, { recursive: true });
+  }
 }
 
+ensureUploadDirectory(uploadsDir);
+
+const registrationUploadFolders = Object.freeze({
+  prof_img: "profile-pics",
+  aadhar_img: "aadhar-images",
+  pan_img: "pan-images",
+  cancelled_cheque: "cancelled-cheques",
+  resume_file: "resumes",
+  experience_file: "experience-documents",
+  certification_file: "certifications",
+});
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
+  destination: (req, file, cb) => {
+    const folderName =
+      registrationUploadFolders[file.fieldname] || "registration-documents";
+    const destinationPath = path.join(uploadsDir, folderName);
+    ensureUploadDirectory(destinationPath);
+    cb(null, destinationPath);
+  },
   filename: (req, file, cb) => {
     const uniqueName =
       Date.now() +
@@ -991,9 +1011,35 @@ const userRegistrationUpload = upload.fields([
   { name: "certification_file", maxCount: 1 },
 ]);
 
+function normalizeUploadedFilePath(uploadedFile) {
+  if (!uploadedFile) return null;
+
+  const candidatePath =
+    uploadedFile.path ||
+    (uploadedFile.destination && uploadedFile.filename
+      ? path.join(uploadedFile.destination, uploadedFile.filename)
+      : "");
+
+  if (candidatePath) {
+    const absolutePath = path.isAbsolute(candidatePath)
+      ? candidatePath
+      : path.resolve(__dirname, candidatePath);
+    const relativePath = path.relative(__dirname, absolutePath);
+
+    if (relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
+      return relativePath.split(path.sep).join("/");
+    }
+  }
+
+  const folderName = registrationUploadFolders[uploadedFile.fieldname] || "";
+  return ["uploads", folderName, uploadedFile.filename]
+    .filter(Boolean)
+    .join("/");
+}
+
 function getUploadedFilePath(files, fieldName) {
   const uploadedFile = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
-  return uploadedFile ? `uploads/${uploadedFile.filename}` : null;
+  return normalizeUploadedFilePath(uploadedFile);
 }
 
 function getDatabaseErrorMessage(err, fallback = "Database error") {
