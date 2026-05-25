@@ -6,7 +6,7 @@
     <title>Admin Panel</title>
     <link rel="icon" type="image/png" href="logo_.png" />
 
-    <link rel="stylesheet" href="admin.css?v=20260523-admin-proposals" />
+    <link rel="stylesheet" href="admin.css?v=20260525-renewals" />
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
@@ -58,6 +58,9 @@
           </li>
           <li onclick="showSection('deals')">
             <i class="fas fa-handshake"></i> Deals
+          </li>
+          <li onclick="showSection('renewals')">
+            <i class="fas fa-rotate"></i> Renewals
           </li>
           <li onclick="showSection('notifications')">
             <i class="fas fa-bell"></i> Notifications
@@ -181,7 +184,7 @@
           </div>
 
           <div class="admin-dashboard-grid">
-            <section class="admin-panel leads-overview-panel">
+            <section class="admin-panel leads-overview-panel" data-dashboard-section="leads" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Leads Overview</h3>
@@ -194,7 +197,7 @@
               <canvas id="adminLeadsOverviewChart"></canvas>
             </section>
 
-            <section class="admin-panel source-panel">
+            <section class="admin-panel source-panel" data-dashboard-section="leads" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Leads by Source</h3>
@@ -207,7 +210,7 @@
               <div id="adminSourceLegend" class="source-legend"></div>
             </section>
 
-            <section class="admin-panel funnel-panel-admin">
+            <section class="admin-panel funnel-panel-admin" data-dashboard-section="leads" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Sales Funnel</h3>
@@ -262,7 +265,7 @@
               </div>
             </section>
 
-            <aside class="admin-panel activity-panel">
+            <aside class="admin-panel activity-panel" data-dashboard-section="notifications" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Activity Feed</h3>
@@ -274,7 +277,7 @@
           </div>
 
           <div class="admin-dashboard-bottom">
-            <section class="admin-panel">
+            <section class="admin-panel" data-dashboard-section="leads" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Recent Leads</h3>
@@ -305,7 +308,7 @@
               </div>
             </section>
 
-            <section class="admin-panel">
+            <section class="admin-panel" data-dashboard-section="followups" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Upcoming Follow Ups</h3>
@@ -335,7 +338,7 @@
               </div>
             </section>
 
-            <aside class="admin-panel tasks-panel">
+            <aside class="admin-panel tasks-panel" data-dashboard-section="followups" role="button" tabindex="0">
               <div class="panel-heading">
                 <div>
                   <h3>Tasks Overview</h3>
@@ -420,6 +423,9 @@
             <div class="dashboard-panels">
               <section
                 class="dashboard-panel chart-panel target-progress-panel"
+                data-dashboard-section="deals"
+                role="button"
+                tabindex="0"
               >
                 <div class="sales-target-header">
                   <div>
@@ -430,7 +436,7 @@
                 <canvas id="adminTargetProgressChart"></canvas>
               </section>
 
-              <section class="dashboard-panel chart-panel">
+              <section class="dashboard-panel chart-panel" data-dashboard-section="deals" role="button" tabindex="0">
                 <div class="panel-heading">
                   <div>
                     <h3>Sales Performance</h3>
@@ -441,7 +447,7 @@
               </section>
             </div>
 
-            <section class="dashboard-panel team-target-board-panel">
+            <section class="dashboard-panel team-target-board-panel" data-dashboard-section="team" role="button" tabindex="0">
               <div class="sales-target-header">
                 <div>
                   <h3>ME & TME Target Board</h3>
@@ -476,6 +482,32 @@
                   <span>Closed Revenue</span>
                   <strong id="adminDashboardSales">Rs. 0</strong>
                   <small id="adminDashboardSalesHint">From closed deals</small>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                class="metric-card deals"
+                onclick="openAdminSection('deals')"
+              >
+                <span class="metric-icon"><i class="fas fa-star"></i></span>
+                <div>
+                  <span>New Sale</span>
+                  <strong id="adminDashboardNewSale">0</strong>
+                  <small id="adminDashboardNewSaleHint">Fresh client wins</small>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                class="metric-card projects"
+                onclick="openAdminSection('renewals')"
+              >
+                <span class="metric-icon"><i class="fas fa-rotate"></i></span>
+                <div>
+                  <span>Renewal</span>
+                  <strong id="adminDashboardRenewal">0</strong>
+                  <small id="adminDashboardRenewalHint">Repeat client wins</small>
                 </div>
               </button>
 
@@ -554,7 +586,7 @@
             </div>
 
             <div class="dashboard-panels">
-              <section class="dashboard-panel">
+              <section class="dashboard-panel" data-dashboard-section="leads" role="button" tabindex="0">
                 <div class="panel-heading">
                   <div>
                     <h3>Sales Funnel Snapshot</h3>
@@ -617,7 +649,7 @@
                 </div>
               </section>
 
-              <section class="dashboard-panel recent-panel">
+              <section class="dashboard-panel recent-panel" data-dashboard-section="deals" role="button" tabindex="0">
                 <div class="panel-heading">
                   <div>
                     <h3>Recent Deals</h3>
@@ -766,6 +798,79 @@
             </thead>
             <tbody id="dealsTable"></tbody>
           </table>
+        </div>
+
+        <div id="renewals" class="section">
+          <div class="admin-section-row renewal-section-heading">
+            <div>
+              <h2>Renewals</h2>
+              <p class="section-subtitle">Annual renewal pipeline</p>
+            </div>
+            <button
+              type="button"
+              class="admin-add-lead-btn"
+              onclick="loadAdminRenewals(true)"
+              title="Refresh renewals"
+            >
+              <i class="fas fa-rotate-right"></i> Refresh
+            </button>
+          </div>
+
+          <div class="renewal-summary-strip">
+            <div class="renewal-summary-card">
+              <span>Total</span>
+              <strong id="adminRenewalTotal">0</strong>
+            </div>
+            <div class="renewal-summary-card overdue">
+              <span>Overdue</span>
+              <strong id="adminRenewalOverdue">0</strong>
+            </div>
+            <div class="renewal-summary-card due-soon">
+              <span>Due Soon</span>
+              <strong id="adminRenewalDueSoon">0</strong>
+            </div>
+            <div class="renewal-summary-card started">
+              <span>Started</span>
+              <strong id="adminRenewalStarted">0</strong>
+            </div>
+          </div>
+
+          <input
+            type="text"
+            id="renewalsSearch"
+            placeholder="Search renewals..."
+            class="search-box"
+            onkeyup="filterTable('renewalsTable', 'renewalsSearch')"
+          />
+
+          <div class="table-responsive">
+            <table
+              class="renewal-table"
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Contact</th>
+                  <th>Email</th>
+                  <th>Deal Amount</th>
+                  <th>Closed Date</th>
+                  <th>Renewal Date</th>
+                  <th>Days Left</th>
+                  <th>Status</th>
+                  <th>Owner</th>
+                </tr>
+              </thead>
+              <tbody id="renewalsTable">
+                <tr>
+                  <td colspan="10">Loading renewals...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div id="notifications" class="section">
@@ -1993,7 +2098,7 @@
     </div>
     <script src="project-tracker.js"></script>
     <script src="payroll-management.js?v=20260524-fixed-commission"></script>
-    <script src="admin.js?v=20260524-fixed-commission"></script>
+    <script src="admin.js?v=20260525-renewals"></script>
     <script src="admin-proposals.js?v=20260523-proposal-email-auto"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260523-shift-snipsafe"></script>
