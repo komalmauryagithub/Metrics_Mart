@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" href="logo_.png">
     <link rel="stylesheet" href="attendance-face.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="stylesheet" type="text/css" href="tme.css">
+    <link rel="stylesheet" type="text/css" href="tme.css?v=20260524-renewal-status">
     <link rel="stylesheet" href="payroll-management.css">
     <link rel="stylesheet" href="leave-management.css">
     <link rel="stylesheet" href="project-tracker.css">
@@ -138,7 +138,7 @@
                     </div>
                 </div>
 
-                <div class="target-progress-panel">
+                <div class="target-progress-panel" data-dashboard-section="deals" role="button" tabindex="0">
                     <div class="panel-heading">
                         <h3>Target Progress</h3>
                         <span id="tmeTargetProgressLabel">0% achieved</span>
@@ -236,14 +236,14 @@
                 </div>
 
                 <div class="dashboard-panels">
-                    <div class="dashboard-panel chart-panel">
+                    <div class="dashboard-panel chart-panel" data-dashboard-section="deals" role="button" tabindex="0">
                         <div class="panel-heading">
                             <h3>Performance Overview</h3>
                             <span>This account</span>
                         </div>
                         <canvas id="tmeDashboardChart"></canvas>
                     </div>
-                    <div class="dashboard-panel funnel-panel-dashboard">
+                    <div class="dashboard-panel funnel-panel-dashboard" data-dashboard-section="leads" role="button" tabindex="0">
                         <div class="panel-heading">
                             <h3>Sales Funnel</h3>
                             <span id="dashboardFunnelRate">0% converted</span>
@@ -258,7 +258,7 @@
                     </div>
                 </div>
 
-                <div class="dashboard-panel recent-panel">
+                <div class="dashboard-panel recent-panel" data-dashboard-section="deals" role="button" tabindex="0">
                     <div class="panel-heading">
                         <h3>Recent Deals</h3>
                         <button type="button" onclick="showSection('deals')">View Deals</button>
@@ -398,6 +398,7 @@
                     <th>Payment Method</th>
                     <th>Closed Date</th>
                     <th>Status</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody id="dealsTableBody"></tbody>
@@ -791,7 +792,7 @@
     <script src="project-tracker.js"></script>
     <script src="payroll-management.js?v=20260524-fixed-commission"></script>
     <script src="attendance-face.js?v=20260523-profile-face"></script>
-    <script src="tme.js?v=20260524-fixed-commission"></script>
+    <script src="tme.js?v=20260524-renewal-dashboard"></script>
     <script src="attendance-auto-checkout.js"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260523-shift-snipsafe"></script>
