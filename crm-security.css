@@ -75,3 +75,71 @@ html.crm-blackout body > :not(.crm-security-shield) {
     inset: 0;
   }
 }
+
+body.redsea-company {
+  --admin-accent: #dc2626;
+  --admin-accent-dark: #991b1b;
+  --admin-accent-deep: #7f1d1d;
+  --admin-accent-light: #ef4444;
+  --admin-accent-soft: #fee2e2;
+  --admin-accent-soft-2: #fff5f5;
+  --admin-accent-shadow: rgba(220, 38, 38, 0.18);
+  --admin-accent-shadow-strong: rgba(220, 38, 38, 0.32);
+  --admin-accent-gradient: linear-gradient(135deg, #991b1b 0%, #dc2626 54%, #ef4444 100%);
+  --admin-accent-gradient-soft: linear-gradient(135deg, rgba(153, 27, 27, 0.14) 0%, rgba(220, 38, 38, 0.08) 45%, rgba(239, 68, 68, 0.12) 100%);
+}
+
+body.redsea-company .header {
+  border-bottom-color: #dc2626 !important;
+}
+
+body.redsea-company .cyan,
+body.redsea-company .section h2,
+body.redsea-company .dashboard-header h2,
+body.redsea-company .panel-heading h3 {
+  color: #b91c1c !important;
+}
+
+body.redsea-company .brand-panel.cyan,
+body.redsea-company .role,
+body.redsea-company .role-badge,
+body.redsea-company .status-badge.deal_closed,
+body.redsea-company .save-btn,
+body.redsea-company .submit-btn,
+body.redsea-company .btn-save,
+body.redsea-company .add-btn,
+body.redsea-company .refresh-dashboard-btn {
+  background: linear-gradient(135deg, #991b1b 0%, #dc2626 58%, #ef4444 100%) !important;
+  color: #ffffff !important;
+}
+
+body.redsea-company .avatar,
+body.redsea-company .user-avatar,
+body.redsea-company .profile-avatar {
+  border-color: #dc2626 !important;
+}
+
+body.redsea-company .sidebar li.active,
+body.redsea-company .sidebar li:hover,
+body.redsea-company .nav-item.active,
+body.redsea-company .nav-item:hover {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+}
+
+body.redsea-company .dashboard-card,
+body.redsea-company .stat-card,
+body.redsea-company .metric-card,
+body.redsea-company .dashboard-panel,
+body.redsea-company .form-card,
+body.redsea-company .table-card {
+  border-color: rgba(220, 38, 38, 0.16) !important;
+  box-shadow: 0 16px 34px rgba(153, 27, 27, 0.08) !important;
+}
+
+body.redsea-company input:focus,
+body.redsea-company select:focus,
+body.redsea-company textarea:focus {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12) !important;
+}
