@@ -344,6 +344,40 @@ function setupMeLeadForm() {
   toggleMeLeadActionSections();
 }
 
+function normalizeMeLeadCompanyScope(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+  if (
+    normalized === "metrics" ||
+    normalized === "metricsmart" ||
+    normalized === "metricsmartinfolinepvtltd"
+  ) {
+    return "metrics";
+  }
+
+  return "";
+}
+
+function getDefaultMeLeadCompanyScope() {
+  return (
+    normalizeMeLeadCompanyScope(
+      currentUser?.company_key ||
+        currentUser?.selected_company ||
+        currentUser?.comp_name,
+    ) || "metrics"
+  );
+}
+
+function setMeLeadCompanyScope(value = "") {
+  const field = document.querySelector('#meLeadForm [name="company_scope"]');
+  if (field) {
+    field.value = normalizeMeLeadCompanyScope(value) || getDefaultMeLeadCompanyScope();
+  }
+}
+
 function openMeLeadForm() {
   const modal = document.getElementById("meLeadModal");
   const form = document.getElementById("meLeadForm");
@@ -351,6 +385,7 @@ function openMeLeadForm() {
   if (!modal || !form) return;
 
   resetMeLeadFormState();
+  setMeLeadCompanyScope();
   modal.classList.remove("hidden");
   modal.classList.add("show");
   document.body.classList.add("modal-open");
@@ -435,6 +470,7 @@ function resetMeLeadFormState() {
 
   if (form) {
     form.reset();
+    setMeLeadCompanyScope();
   }
 
   if (form?.elements?.sales_type) {
@@ -667,6 +703,7 @@ async function populateMeLeadFormFromDeal(lead) {
   setMeLeadFormValue("pincode", lead.pincode);
   setMeLeadFormValue("state", lead.state);
   setMeLeadFormValue("maps_lnk", lead.maps_lnk);
+  setMeLeadCompanyScope(lead.company_scope);
   setMeLeadFormValue("sales_type", "renewal");
   setMeLeadFormValue("source_lead", lead.source_lead);
   setMeLeadFormValue("industry_type", lead.industry_type);
@@ -769,6 +806,7 @@ async function handleMeLeadFormSubmit(event) {
     pincode: formData.get("pincode"),
     state: formData.get("state"),
     maps_lnk: mapsLink,
+    company_scope: formData.get("company_scope") || getDefaultMeLeadCompanyScope(),
     source_lead: formData.get("source_lead"),
     industry_type: formData.get("industry_type"),
     sales_type: salesTypeValue,
