@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
-    <link rel="stylesheet" href="crm-security.css?v=20260522-1" />
+    <link rel="stylesheet" href="crm-security.css?v=20260525-redsea" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -545,6 +545,15 @@
                     <input type="text" placeholder="GST Number" name="gst_no">
                 </div>
 
+                <h3>Lead Company</h3>
+                <div class="form-grid">
+                    <select name="company_scope" required>
+                        <option value="">Select Lead Company</option>
+                        <option value="metrics">Metrics Mart Infoline Pvt Ltd</option>
+                        <option value="redsea">RedSea</option>
+                    </select>
+                </div>
+
                 <h3>Full Address</h3>
                 <div class="form-grid">
                     <input type="text" placeholder="Flat/Office No" name="flat_no" onchange="generateMeLeadMapLink()">
@@ -745,7 +754,7 @@
     <script src="me.js?v=20260524-renewal-dashboard"></script>
     <script src="attendance-auto-checkout.js"></script>
     <script src="leave-management.js"></script>
-    <script src="crm-security.js?v=20260523-shift-snipsafe"></script>
+    <script src="crm-security.js?v=20260525-redsea"></script>
 </body>
 
 </html>
