@@ -55,6 +55,7 @@ const adminDashboardState = {
     followups: [],
     deals: [],
     projects: [],
+    renewals: [],
 };
 let adminDashboardCache = {
     leads: [],
@@ -64,6 +65,7 @@ let adminDashboardCache = {
     notifications: [],
     team: [],
     projects: [],
+    renewals: [],
 };
 const BASE_URL =
     window.location.protocol === "file:" || ["localhost", "127.0.0.1"].includes(window.location.hostname)
@@ -190,6 +192,7 @@ function loadAdminData() {
     loadAppointments();
     loadFollowups();
     loadDeals();
+    loadAdminRenewals();
     loadDownsaleNotifications();
     loadAdminAttendance();
     loadTeam();
@@ -508,6 +511,67 @@ function setAdminDashboardText(id, value) {
 function formatCompactMoney(value) {
     const amount = Number(value || 0);
     return `Rs. ${amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+function getAdminDealIdentityKey(deal) {
+    const parts = [
+        deal?.email,
+        deal?.contact,
+        deal?.client_name,
+        deal?.company_name,
+    ]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+
+    return parts.join("|") || `deal-${deal?.id || Math.random()}`;
+}
+
+function summarizeAdminDealMix(deals = []) {
+    const seenClients = new Set();
+    const orderedDeals = [...deals].sort((left, right) => {
+        const leftDate = new Date(left?.closed_date || 0).getTime();
+        const rightDate = new Date(right?.closed_date || 0).getTime();
+
+        if (leftDate !== rightDate) return leftDate - rightDate;
+        return Number(left?.id || 0) - Number(right?.id || 0);
+    });
+
+    return orderedDeals.reduce(
+        (summary, deal) => {
+            const amount = Number(deal?.deal_amount || 0);
+            const key = getAdminDealIdentityKey(deal);
+            const explicitSalesType = String(deal?.sales_type || deal?.salesType || "")
+                .toLowerCase()
+                .trim();
+            const isClosedRenewalSale =
+                explicitSalesType === "renewal" ||
+                (!explicitSalesType && seenClients.has(key));
+            const hasRenewalActivity =
+                isClosedRenewalSale ||
+                Number(deal?.has_renewal || 0) > 0 ||
+                Number(deal?.renewal_count || 0) > 0;
+
+            if (isClosedRenewalSale) {
+                summary.renewalAmount += amount;
+            } else {
+                summary.newSaleCount += 1;
+                summary.newSaleAmount += amount;
+                seenClients.add(key);
+            }
+
+            if (hasRenewalActivity) {
+                summary.renewalCount += 1;
+            }
+
+            return summary;
+        },
+        {
+            newSaleCount: 0,
+            renewalCount: 0,
+            newSaleAmount: 0,
+            renewalAmount: 0,
+        },
+    );
 }
 
 function renderAdminTargetProgress(data = {}) {
@@ -913,6 +977,7 @@ function showSection(id) {
     if (id === 'appointments') loadAppointments();
     if (id === 'followups') loadFollowups();
     if (id === 'deals') loadDeals();
+    if (id === 'renewals') loadAdminRenewals();
     if (id === 'notifications') loadDownsaleNotifications();
     if (id === 'attendance') loadAdminAttendance();
     if (id === 'team') loadTeam();
@@ -947,6 +1012,28 @@ function openAdminSection(sectionId) {
     showSection(sectionId);
     scrollAdminViewportToTop();
 }
+
+function isDashboardPanelActionBlocked(event) {
+    return Boolean(
+        event.target.closest("a, button, input, select, textarea, .funnel-row, .summary-service-btn, .summary-service-dropdown"),
+    );
+}
+
+document.addEventListener("click", (event) => {
+    const panel = event.target.closest("[data-dashboard-section]");
+    if (!panel || isDashboardPanelActionBlocked(event)) return;
+
+    openAdminSection(panel.dataset.dashboardSection);
+});
+
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const panel = event.target.closest("[data-dashboard-section]");
+    if (!panel || event.target !== panel) return;
+
+    event.preventDefault();
+    openAdminSection(panel.dataset.dashboardSection);
+});
 
 function openAdminTeamRegistration() {
     openAdminSection("team");
@@ -1387,6 +1474,140 @@ async function loadDeals() {
     // document.getElementById('receivedLabel').textContent = `Received: ${receivedCount}`;
     // document.getElementById('failedLabel').textContent = `Failed: ${failedCount}`;
 
+}
+
+function formatAdminRenewalDate(value) {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return "-";
+
+    const datePart = rawValue.slice(0, 10);
+    const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return rawValue;
+
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime())
+        ? rawValue
+        : date.toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+        });
+}
+
+function formatAdminRenewalDays(value) {
+    const days = Number(value);
+    if (!Number.isFinite(days)) return "-";
+    if (days < 0) return `${Math.abs(days)} overdue`;
+    if (days === 0) return "Today";
+    if (days === 1) return "1 day";
+    return `${days} days`;
+}
+
+function getAdminRenewalStatusMeta(item = {}) {
+    const renewalCount = Number(item.renewal_count || item.has_renewal || 0);
+    const closedRenewalCount = Number(item.renewal_closed_count || 0);
+    const daysLeft = Number(item.days_left);
+
+    if (closedRenewalCount > 0) {
+        return { className: "upcoming", label: "Renewed" };
+    }
+
+    if (renewalCount > 0) {
+        return { className: "started", label: "Started" };
+    }
+
+    if (Number.isFinite(daysLeft) && daysLeft < 0) {
+        return { className: "overdue", label: "Overdue" };
+    }
+
+    if (daysLeft === 0) {
+        return { className: "due-today", label: "Due Today" };
+    }
+
+    if (Number.isFinite(daysLeft) && daysLeft <= 30) {
+        return { className: "due-soon", label: "Due Soon" };
+    }
+
+    return { className: "upcoming", label: "Upcoming" };
+}
+
+function renderAdminRenewalSummary(summary = {}) {
+    setAdminDashboardText("adminRenewalTotal", String(Number(summary.total || 0)));
+    setAdminDashboardText("adminRenewalOverdue", String(Number(summary.overdue || 0)));
+    setAdminDashboardText("adminRenewalDueSoon", String(Number(summary.dueSoon || 0)));
+    setAdminDashboardText("adminRenewalStarted", String(Number(summary.started || 0)));
+}
+
+function renderAdminRenewalRows(renewals = []) {
+    const table = document.getElementById("renewalsTable");
+    if (!table) return;
+
+    if (!renewals.length) {
+        table.innerHTML = `<tr><td colspan="10">No renewal records found</td></tr>`;
+        return;
+    }
+
+    table.innerHTML = renewals
+        .map((item) => {
+            const status = getAdminRenewalStatusMeta(item);
+            const contact = item.contact || "-";
+            const email = item.email || "-";
+            const owner = item.owner_name || item.assign_emp || "-";
+
+            return `
+                <tr>
+                    <td>${escapeAdminHtml(item.company_name || "-")}</td>
+                    <td>${escapeAdminHtml(item.client_name || "-")}</td>
+                    <td>${escapeAdminHtml(contact)}</td>
+                    <td>${escapeAdminHtml(email)}</td>
+                    <td>${escapeAdminHtml(formatCompactMoney(item.deal_amount || 0))}</td>
+                    <td>${escapeAdminHtml(formatAdminRenewalDate(item.closed_date))}</td>
+                    <td>${escapeAdminHtml(formatAdminRenewalDate(item.renewal_due_date))}</td>
+                    <td>${escapeAdminHtml(formatAdminRenewalDays(item.days_left))}</td>
+                    <td><span class="renewal-status ${status.className}">${escapeAdminHtml(status.label)}</span></td>
+                    <td>${escapeAdminHtml(owner)}</td>
+                </tr>
+            `;
+        })
+        .join("");
+}
+
+async function loadAdminRenewals(forceRefresh = false) {
+    const table = document.getElementById("renewalsTable");
+    if (!table) return;
+
+    if (forceRefresh || !adminDashboardCache.renewals.length) {
+        table.innerHTML = `<tr><td colspan="10">Loading renewals...</td></tr>`;
+    }
+
+    try {
+        const params = new URLSearchParams({
+            days: "365",
+        });
+
+        if (currentUser?.id) {
+            params.set("adminId", currentUser.id);
+        }
+
+        const response = await fetch(`${BASE_URL}/api/admin/renewals?${params.toString()}`, {
+            cache: "no-store",
+        });
+        const result = await parseAdminApiResponse(response, "Renewals");
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || "Failed to load renewal details");
+        }
+
+        const renewals = Array.isArray(result.data) ? result.data : [];
+        adminDashboardCache.renewals = renewals;
+        adminDashboardState.renewals = renewals;
+        renderAdminRenewalSummary(result.summary || {});
+        renderAdminRenewalRows(renewals);
+    } catch (err) {
+        console.error("Admin renewals error:", err);
+        renderAdminRenewalSummary({});
+        table.innerHTML = `<tr><td colspan="10">${escapeAdminHtml(err.message || "Unable to load renewals")}</td></tr>`;
+    }
 }
 
 async function loadDownsaleNotifications() {
@@ -4962,11 +5183,28 @@ function renderAdminExtraWidgets(data = {}) {
         : deals.length;
     const achievedSales = Number(salesTarget.achieved || data?.receivedRevenue || 0);
     const conversion = leads.length ? Math.round((dealsCount / leads.length) * 100) : 0;
+    const salesMix = summarizeAdminDealMix(deals);
 
     setAdminDashboardText("adminDashboardSales", formatCompactMoney(achievedSales));
     setAdminDashboardText(
         "adminDashboardSalesHint",
         dealsCount ? `${dealsCount} deals closed` : "From closed deals",
+    );
+    setAdminDashboardText("adminDashboardNewSale", String(salesMix.newSaleCount));
+    setAdminDashboardText(
+        "adminDashboardNewSaleHint",
+        salesMix.newSaleCount
+            ? `${formatCompactMoney(salesMix.newSaleAmount)} from new sales`
+            : "Fresh client wins",
+    );
+    setAdminDashboardText("adminDashboardRenewal", String(salesMix.renewalCount));
+    setAdminDashboardText(
+        "adminDashboardRenewalHint",
+        salesMix.renewalCount
+            ? salesMix.renewalAmount
+                ? `${formatCompactMoney(salesMix.renewalAmount)} closed renewal value`
+                : "Renewal activity started"
+            : "Repeat client wins",
     );
     setAdminDashboardText("adminDashboardLeads", String(leads.length));
     setAdminDashboardText("adminDashboardAppointments", String(appointments.length));
