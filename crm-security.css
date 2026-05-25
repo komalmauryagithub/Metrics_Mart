@@ -143,3 +143,47 @@ body.redsea-company textarea:focus {
   border-color: #dc2626 !important;
   box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12) !important;
 }
+
+body.redsea-company table thead,
+body.redsea-company table th,
+body.redsea-company .summary-table th,
+body.redsea-company .data-table th,
+body.redsea-company .admin-table th,
+body.redsea-company .accounts-table th {
+  background: #fee2e2 !important;
+  color: #7f1d1d !important;
+  border-color: #fecaca !important;
+}
+
+body.redsea-company table,
+body.redsea-company .table-wrapper,
+body.redsea-company .table-responsive {
+  border-color: rgba(220, 38, 38, 0.18) !important;
+}
+
+body.redsea-company table td,
+body.redsea-company .summary-table td,
+body.redsea-company .data-table td,
+body.redsea-company .admin-table td,
+body.redsea-company .accounts-table td {
+  border-color: #fee2e2 !important;
+}
+
+body.redsea-company table tbody tr:hover,
+body.redsea-company .summary-table tbody tr:hover,
+body.redsea-company .data-table tbody tr:hover {
+  background: #fff5f5 !important;
+}
+
+body.redsea-company .table-toolbar,
+body.redsea-company .table-header,
+body.redsea-company .list-header {
+  border-color: rgba(220, 38, 38, 0.18) !important;
+}
+
+body.redsea-company .status-badge.appointment,
+body.redsea-company .status-badge.followup,
+body.redsea-company .status-pill,
+body.redsea-company .badge {
+  border-color: #fecaca !important;
+}
