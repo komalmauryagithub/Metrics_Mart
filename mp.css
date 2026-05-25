@@ -694,3 +694,39 @@ body {
   position: relative;
   z-index: 1;
 }
+
+body.redsea-login .form-card {
+  border-color: #dc2626;
+  box-shadow: 0 0 40px rgba(220, 38, 38, 0.22);
+}
+
+body.redsea-login .left-section {
+  background: linear-gradient(135deg, #ef4444, #991b1b);
+}
+
+body.redsea-login .input-group label,
+body.redsea-login .link,
+body.redsea-login .text-link-btn {
+  color: #b91c1c;
+}
+
+body.redsea-login .input-group input:focus,
+body.redsea-login .input-group select:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.14);
+}
+
+body.redsea-login .submit-btn,
+body.redsea-login .popup-btn {
+  background-color: #dc2626;
+}
+
+body.redsea-login .submit-btn:hover,
+body.redsea-login .popup-btn:hover {
+  background-color: #b91c1c;
+}
+
+body.redsea-login .popup-content {
+  border-color: #dc2626;
+  box-shadow: 0 0 40px rgba(220, 38, 38, 0.24);
+}
