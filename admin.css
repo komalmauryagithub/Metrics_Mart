@@ -197,6 +197,12 @@ body {
     margin-bottom: 0;
 }
 
+.section-subtitle {
+    color: #64748b;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
 .admin-add-lead-btn {
     border: none;
     border-radius: 999px;
@@ -1677,6 +1683,94 @@ tbody tr:nth-child(even) {
     border: 1px solid #ccc;
     border-radius: 6px;
     margin-bottom: 15px;
+}
+
+/* ================= RENEWALS UI ================ */
+
+.renewal-section-heading {
+    align-items: flex-start;
+}
+
+.renewal-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin: 12px 0 10px;
+}
+
+.renewal-summary-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid var(--admin-accent);
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.renewal-summary-card span {
+    color: #64748b;
+    display: block;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.renewal-summary-card strong {
+    color: #0f172a;
+    display: block;
+    font-size: 24px;
+    line-height: 1.1;
+    margin-top: 8px;
+}
+
+.renewal-summary-card.overdue {
+    border-left-color: #dc2626;
+}
+
+.renewal-summary-card.due-soon {
+    border-left-color: #f59e0b;
+}
+
+.renewal-summary-card.started {
+    border-left-color: #2563eb;
+}
+
+.renewal-table th,
+.renewal-table td {
+    font-size: 13px;
+    vertical-align: middle;
+}
+
+.renewal-status {
+    border-radius: 999px;
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 5px 10px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.renewal-status.overdue {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.renewal-status.due-today,
+.renewal-status.due-soon {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.renewal-status.started {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.renewal-status.upcoming {
+    background: #dcfce7;
+    color: #166534;
 }
 
 /* TABLE UI */
@@ -4897,6 +4991,15 @@ body.modal-open {
         min-width: 0;
         width: 100%;
     }
+}
+
+[data-dashboard-section] {
+    cursor: pointer;
+}
+
+[data-dashboard-section]:focus-visible {
+    outline: 3px solid rgba(14, 165, 233, 0.35);
+    outline-offset: 3px;
 }
 
 @media (max-width: 640px) {
