@@ -2950,6 +2950,40 @@ function setLeadFormCheckboxGroup(name, values) {
     });
 }
 
+function normalizeLeadCompanyScope(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+  if (
+    normalized === "metrics" ||
+    normalized === "metricsmart" ||
+    normalized === "metricsmartinfolinepvtltd"
+  ) {
+    return "metrics";
+  }
+
+  return "";
+}
+
+function getDefaultLeadCompanyScope() {
+  return (
+    normalizeLeadCompanyScope(
+      currentUser?.company_key ||
+        currentUser?.selected_company ||
+        currentUser?.comp_name,
+    ) || "metrics"
+  );
+}
+
+function setLeadCompanyScope(value = "") {
+  setLeadFormValue(
+    "company_scope",
+    normalizeLeadCompanyScope(value) || getDefaultLeadCompanyScope(),
+  );
+}
+
 function resetLeadFormState() {
   editingLeadId = null;
   renewalLeadAttribution = null;
@@ -2957,6 +2991,7 @@ function resetLeadFormState() {
   const form = document.getElementById("leadForm");
   if (form) {
     form.reset();
+    setLeadCompanyScope();
   }
 
   const employeeSelect = document.getElementById("lead_assign_emp");
@@ -2982,6 +3017,7 @@ function resetLeadFormState() {
   }
 
   setLeadFormValue("sales_type", "new");
+  setLeadCompanyScope();
 
   handleActionChange();
 }
@@ -3005,6 +3041,7 @@ async function populateLeadForm(lead) {
   setLeadFormValue("pincode", lead.pincode);
   setLeadFormValue("state", lead.state);
   setLeadFormValue("maps_lnk", lead.maps_lnk);
+  setLeadCompanyScope(lead.company_scope);
 
   setLeadFormValue("source_lead", lead.source_lead);
   setLeadFormValue("industry_type", lead.industry_type);
@@ -3161,6 +3198,7 @@ document
       pincode: form.get("pincode"),
       state: form.get("state"),
       maps_lnk: form.get("maps_lnk"),
+      company_scope: form.get("company_scope") || getDefaultLeadCompanyScope(),
 
       source_lead: form.get("source_lead"),
       industry_type: form.get("industry_type"),
@@ -3527,6 +3565,7 @@ async function handleLeadFormSubmit(event) {
     pincode: form.get("pincode"),
     state: form.get("state"),
     maps_lnk: form.get("maps_lnk"),
+    company_scope: form.get("company_scope") || getDefaultLeadCompanyScope(),
     source_lead: form.get("source_lead"),
     industry_type: form.get("industry_type"),
     sales_type: salesTypeValue,
