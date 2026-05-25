@@ -4104,6 +4104,40 @@ function setupAdminLeadForm() {
     toggleAdminLeadActionSections();
 }
 
+function normalizeAdminLeadCompanyScope(value) {
+    const normalized = String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+    if (
+        normalized === "metrics" ||
+        normalized === "metricsmart" ||
+        normalized === "metricsmartinfolinepvtltd"
+    ) {
+        return "metrics";
+    }
+
+    return "";
+}
+
+function getDefaultAdminLeadCompanyScope() {
+    return (
+        normalizeAdminLeadCompanyScope(
+            currentUser?.company_key ||
+                currentUser?.selected_company ||
+                currentUser?.comp_name,
+        ) || "metrics"
+    );
+}
+
+function setAdminLeadCompanyScope(value = "") {
+    const field = document.querySelector('#adminLeadForm [name="company_scope"]');
+    if (field) {
+        field.value = normalizeAdminLeadCompanyScope(value) || getDefaultAdminLeadCompanyScope();
+    }
+}
+
 function openAdminLeadForm() {
     const modal = document.getElementById("adminLeadModal");
     const form = document.getElementById("adminLeadForm");
@@ -4111,6 +4145,7 @@ function openAdminLeadForm() {
     if (!modal || !form) return;
 
     resetAdminLeadFormState();
+    setAdminLeadCompanyScope();
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("modal-open");
@@ -4194,6 +4229,7 @@ function resetAdminLeadFormState() {
 
     if (form) {
         form.reset();
+        setAdminLeadCompanyScope();
     }
 
     if (employeeSelect) {
@@ -4367,6 +4403,7 @@ async function handleAdminLeadFormSubmit(event) {
         pincode: formData.get("pincode"),
         state: formData.get("state"),
         maps_lnk: mapsLink,
+        company_scope: formData.get("company_scope") || getDefaultAdminLeadCompanyScope(),
         source_lead: formData.get("source_lead"),
         industry_type: formData.get("industry_type"),
         web_type: formData.getAll("web_type[]"),
