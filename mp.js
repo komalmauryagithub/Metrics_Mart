@@ -19,6 +19,31 @@ function showRegisterForm() {
   document.getElementById('registerForm').classList.remove('hidden');
 }
 
+function normalizeCompanyKey(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  if (normalized === "redsea" || normalized === "redseadigitals") {
+    return "redsea";
+  }
+
+  if (
+    normalized === "metrics" ||
+    normalized === "metricsmart" ||
+    normalized === "metricsmartinfolinepvtltd"
+  ) {
+    return "metrics";
+  }
+
+  return "";
+}
+
+function applyLoginCompanyTheme(companyKey) {
+  const isRedSea = normalizeCompanyKey(companyKey) === "redsea";
+  document.body.classList.toggle("redsea-login", isRedSea);
+}
+
 function openForgotPasswordModal() {
   const modal = document.getElementById('forgotPasswordModal');
   if (!modal) return;
@@ -87,24 +112,28 @@ function closePopup() {
   document.getElementById('popup').classList.add('hidden');
 }
 
-function getRedirectPage(role) {
+function getRedirectPage(role, companyKey = "") {
+  const suffix =
+    normalizeCompanyKey(companyKey) === "redsea" ? "?company=redsea" : "";
+
   switch ((role || '').toLowerCase().trim()) {
     case 'admin':
-      return 'admin.html';
+      return `admin.html${suffix}`;
     case 'hr':
-      return 'hr.html';
+      return `hr.html${suffix}`;
     case 'tme':
-      return 'tme.html';
+      return `tme.html${suffix}`;
     case 'me':
-      return 'me.html';
+      return `me.html${suffix}`;
     case 'dev':
-      return 'dev.html';
+      return `dev.html${suffix}`;
     case 'seo':
-      return 'seo.html';
+      return `seo.html${suffix}`;
     case 'smo':
-      return 'seo.html';
+      return `seo.html${suffix}`;
+    case 'acc':
     case 'accounts':
-      return 'accounts.html';
+      return `accounts.html${suffix}`;
     // case 'dm':
     //   return 'seo.html';
     default:
@@ -144,6 +173,7 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
   e.preventDefault();
 
   const emailOrContact = this.emailOrContact.value.trim();
+  const company = this.company.value;
   const password = this.password.value;
   const btn = document.getElementById("loginBtn");
   const originalText = btn.innerHTML;
@@ -154,6 +184,7 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
   try {
     const body = new URLSearchParams();
     body.append("emailOrContact", emailOrContact);
+    body.append("company", company);
     body.append("password", password);
 
     const res = await fetch(`${BASE_URL}/login`, {
@@ -166,7 +197,10 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
     if (res.ok && data.success) {
       localStorage.setItem("currentUser", JSON.stringify(data.user));
 
-      const redirectPage = getRedirectPage(data.user?.role);
+      const redirectPage = getRedirectPage(
+        data.user?.role,
+        data.user?.company_key || company,
+      );
 
       if (!redirectPage) {
         showPopup("Login Failed", "This role does not have a dashboard assigned yet.", false);
@@ -255,6 +289,13 @@ if (forgotPasswordForm) {
         btn.innerHTML = originalText;
       }
     }
+  });
+}
+
+const loginCompanySelect = document.getElementById("loginCompanySelect");
+if (loginCompanySelect) {
+  loginCompanySelect.addEventListener("change", () => {
+    applyLoginCompanyTheme(loginCompanySelect.value);
   });
 }
 
