@@ -16,6 +16,38 @@
     }
   }
 
+  function getCompanyKey(user = getCurrentUser()) {
+    const normalized = String(
+      user.company_key || user.selected_company || user.comp_name || "",
+    )
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+    if (normalized === "redsea" || normalized === "redseadigitals") {
+      return "redsea";
+    }
+
+    return "metrics";
+  }
+
+  function applyCompanyTheme() {
+    const user = getCurrentUser();
+    const isRedSea = getCompanyKey(user) === "redsea";
+
+    document.body.classList.toggle("redsea-company", isRedSea);
+    document.documentElement.classList.toggle("redsea-company", isRedSea);
+
+    if (isRedSea) {
+      document.title = document.title.replace(/^Metrics/i, "RedSea");
+      document.querySelectorAll(".brand-panel").forEach((element) => {
+        const roleLabel = String(user.role || element.textContent || "")
+          .toUpperCase()
+          .trim();
+        element.textContent = roleLabel ? `REDSEA ${roleLabel}` : "REDSEA";
+      });
+    }
+  }
+
   function formatStampDate(date) {
     return date.toLocaleString("en-IN", {
       day: "2-digit",
@@ -193,6 +225,7 @@
   }
 
   function initCrmSecurity() {
+    applyCompanyTheme();
     ensureShield();
     buildWatermark();
 
