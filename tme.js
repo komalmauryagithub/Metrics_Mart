@@ -2000,6 +2000,7 @@ async function loadAttendance() {
     const attendanceRes = await fetch(`${BASE_URL}/api/attendance/${currentUser.id}`);
     const result = await attendanceRes.json();
     const rows = result.success ? result.data || [] : [];
+
     const today = new Date().toISOString().slice(0, 10);
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
@@ -2071,10 +2072,10 @@ async function markAttendance(type) {
     if (!window.AttendanceFace?.captureForAttendance) {
       throw new Error("Face verification module is not loaded. Refresh and try again.");
     }
+    const location = await getCurrentLocation();
     const facePayload = await window.AttendanceFace.captureForAttendance({
       actionLabel: type === "check-in" ? "Verify Check In" : "Verify Check Out",
     });
-    const location = await getCurrentLocation();
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
