@@ -940,7 +940,7 @@ function ensureUploadDirectory(directoryPath) {
 
 ensureUploadDirectory(uploadsDir);
 
-const registrationUploadFolders = Object.freeze({
+const registrationPrimaryUploadFolders = Object.freeze({
   prof_img: "profile-pics",
   aadhar_img: "aadhar-images",
   pan_img: "pan-images",
@@ -950,10 +950,59 @@ const registrationUploadFolders = Object.freeze({
   certification_file: "certifications",
 });
 
-Object.values(registrationUploadFolders).forEach((folderName) => {
+const registrationUploadFieldAliases = Object.freeze({
+  prof_img: ["prof_img", "profile_img", "profile_image", "photo", "avatar"],
+  aadhar_img: ["aadhar_img", "aadhar_image", "aadhar_file", "aadhar_card"],
+  pan_img: ["pan_img", "pan_image", "pan_file", "pan_card"],
+  cancelled_cheque: [
+    "cancelled_cheque",
+    "cancelled_cheque_file",
+    "cancelled_cheque_img",
+    "cheque_file",
+  ],
+  resume_file: ["resume_file", "resume", "resume_doc", "resume_document"],
+  experience_file: [
+    "experience_file",
+    "experience_doc",
+    "experience_document",
+    "experience_letter",
+  ],
+  certification_file: [
+    "certification_file",
+    "certificate_file",
+    "certification_doc",
+    "certificate_doc",
+  ],
+});
+
+const registrationUploadFolders = Object.freeze(
+  Object.fromEntries(
+    Object.entries(registrationUploadFieldAliases).flatMap(([primaryField, aliases]) =>
+      aliases.map((alias) => [alias, registrationPrimaryUploadFolders[primaryField]]),
+    ),
+  ),
+);
+
+const uploadFolderNames = new Set([
+  ...Object.values(registrationPrimaryUploadFolders),
+  "registration-documents",
+  "payments",
+  "project-phases",
+  "leaves",
+]);
+
+uploadFolderNames.forEach((folderName) => {
   ensureUploadDirectory(path.join(uploadsDir, folderName));
 });
-ensureUploadDirectory(path.join(uploadsDir, "registration-documents"));
+
+function getSafeUploadBaseName(originalName, fallback = "file") {
+  return String(originalName || fallback)
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48) || fallback;
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -964,11 +1013,15 @@ const storage = multer.diskStorage({
     cb(null, destinationPath);
   },
   filename: (req, file, cb) => {
-    const uniqueName =
-      Date.now() +
-      "-" +
-      Math.round(Math.random() * 1e9) +
-      path.extname(file.originalname);
+    const fieldPrefix = String(file.fieldname || "upload")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 28) || "upload";
+    const safeName = getSafeUploadBaseName(file.originalname, fieldPrefix);
+    const uniqueName = `${fieldPrefix}-${Date.now()}-${Math.round(
+      Math.random() * 1e9,
+    )}-${safeName}${path.extname(file.originalname)}`;
     cb(null, uniqueName);
   },
 });
@@ -1014,15 +1067,12 @@ const upload = multer({
   },
 });
 
-const userRegistrationUpload = upload.fields([
-  { name: "prof_img", maxCount: 1 },
-  { name: "aadhar_img", maxCount: 1 },
-  { name: "pan_img", maxCount: 1 },
-  { name: "cancelled_cheque", maxCount: 1 },
-  { name: "resume_file", maxCount: 1 },
-  { name: "experience_file", maxCount: 1 },
-  { name: "certification_file", maxCount: 1 },
-]);
+const userRegistrationUpload = upload.fields(
+  Object.keys(registrationUploadFolders).map((fieldName) => ({
+    name: fieldName,
+    maxCount: 1,
+  })),
+);
 
 function normalizeUploadedFilePath(uploadedFile) {
   if (!uploadedFile) return null;
@@ -1051,8 +1101,19 @@ function normalizeUploadedFilePath(uploadedFile) {
 }
 
 function getUploadedFilePath(files, fieldName) {
-  const uploadedFile = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
-  return normalizeUploadedFilePath(uploadedFile);
+  const fieldNames = registrationUploadFieldAliases[fieldName] || [fieldName];
+
+  for (const candidateField of fieldNames) {
+    const uploadedFile = Array.isArray(files?.[candidateField])
+      ? files[candidateField][0]
+      : null;
+
+    if (uploadedFile) {
+      return normalizeUploadedFilePath(uploadedFile);
+    }
+  }
+
+  return null;
 }
 
 function getDatabaseErrorMessage(err, fallback = "Database error") {
@@ -2966,7 +3027,7 @@ if (!fs.existsSync(paymentUploadsDir)) {
 }
 
 const paymentStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/payments/"),
+  destination: (req, file, cb) => cb(null, paymentUploadsDir),
   filename: (req, file, cb) => {
     const uniqueName =
       "payment-" +
@@ -2996,7 +3057,7 @@ if (!fs.existsSync(projectPhaseUploadsDir)) {
 }
 
 const projectPhaseStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/project-phases/"),
+  destination: (req, file, cb) => cb(null, projectPhaseUploadsDir),
   filename: (req, file, cb) => {
     const safeName = String(file.originalname || "file")
       .replace(/\.[^/.]+$/, "")
@@ -3047,7 +3108,7 @@ if (!fs.existsSync(leaveUploadsDir)) {
 }
 
 const leaveStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/leaves/"),
+  destination: (req, file, cb) => cb(null, leaveUploadsDir),
   filename: (req, file, cb) => {
     const safeName = String(file.originalname || "leave-file")
       .replace(/\.[^/.]+$/, "")
