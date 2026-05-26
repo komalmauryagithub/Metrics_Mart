@@ -8,13 +8,16 @@
   z-index: 10000;
   display: grid;
   place-items: center;
-  padding: 18px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   background: rgba(15, 23, 42, 0.58);
 }
 
 .attendance-face-dialog {
   width: min(420px, 100%);
   max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   overflow: auto;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 16px;
@@ -203,13 +206,20 @@
 
 @media (max-width: 560px) {
   .attendance-face-modal {
-    padding: 10px;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
     align-items: end;
   }
 
   .attendance-face-dialog {
     border-radius: 14px;
     padding: 14px;
+    width: 100%;
+  }
+
+  .attendance-face-video-wrap {
+    aspect-ratio: 3 / 4;
+    max-height: min(58vh, 390px);
+    max-height: min(58dvh, 390px);
   }
 
   .attendance-face-actions {
@@ -222,5 +232,18 @@
 
   .attendance-face-capture-btn {
     width: 100%;
+  }
+}
+
+@media (max-width: 380px) {
+  .attendance-face-head h2 {
+    font-size: 18px;
+  }
+
+  .attendance-face-primary,
+  .attendance-face-secondary,
+  .attendance-face-capture-btn {
+    min-height: 42px;
+    padding: 9px 12px;
   }
 }
