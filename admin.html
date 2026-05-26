@@ -6,11 +6,11 @@
     <title>Admin Panel</title>
     <link rel="icon" type="image/png" href="logo_.png" />
 
-    <link rel="stylesheet" href="admin.css?v=20260525-renewals" />
+    <link rel="stylesheet" href="admin.css?v=20260526-mobile-layout" />
     <link rel="stylesheet" href="payroll-management.css" />
     <link rel="stylesheet" href="leave-management.css" />
     <link rel="stylesheet" href="project-tracker.css" />
-    <link rel="stylesheet" href="crm-security.css?v=20260526-table-scroll" />
+    <link rel="stylesheet" href="crm-security.css?v=20260526-mobile-panels" />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
@@ -697,23 +697,25 @@
             class="search-box"
             onkeyup="filterTable('leadsTable', 'leadsSearch')"
           />
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Company</th>
-                <th>Client</th>
-                <th>Contact</th>
-                <th>Email</th>
-                <th>Action Type</th>
-              </tr>
-            </thead>
-            <tbody id="leadsTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Contact</th>
+                  <th>Email</th>
+                  <th>Action Type</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTable"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="appointments" class="section">
@@ -725,22 +727,24 @@
             class="search-box"
             onkeyup="filterTable('appointmentsTable', 'appointmentsSearch')"
           />
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Client</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Assigned To</th>
-              </tr>
-            </thead>
-            <tbody id="appointmentsTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Assigned To</th>
+                </tr>
+              </thead>
+              <tbody id="appointmentsTable"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="followups" class="section">
@@ -752,23 +756,25 @@
             class="search-box"
             onkeyup="filterTable('followupsTable', 'followupsSearch')"
           />
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Client</th>
-                <th>Follow Date</th>
-                <th>Follow Time</th>
-                <th>Employee</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody id="followupsTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Follow Date</th>
+                  <th>Follow Time</th>
+                  <th>Employee</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="followupsTable"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="deals" class="section">
@@ -780,24 +786,26 @@
             class="search-box"
             onkeyup="filterTable('dealsTable', 'dealsSearch')"
           />
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Client</th>
-                <th>Deal Amount</th>
-                <th>Payment Method</th>
-                <th>Payment Status</th>
-                <th>Tax Invoice</th>
-                <th>Proforma Invoice</th>
-              </tr>
-            </thead>
-            <tbody id="dealsTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Deal Amount</th>
+                  <th>Payment Method</th>
+                  <th>Payment Status</th>
+                  <th>Tax Invoice</th>
+                  <th>Proforma Invoice</th>
+                </tr>
+              </thead>
+              <tbody id="dealsTable"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="renewals" class="section">
@@ -884,30 +892,32 @@
               filterTable('downsaleRequestsTable', 'notificationsSearch')
             "
           />
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Client</th>
-                <th>Scope</th>
-                <th>Standard</th>
-                <th>Downsale</th>
-                <th>ME</th>
-                <th>Reason</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="downsaleRequestsTable">
-              <tr>
-                <td colspan="9">Loading notifications...</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Client</th>
+                  <th>Scope</th>
+                  <th>Standard</th>
+                  <th>Downsale</th>
+                  <th>ME</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="downsaleRequestsTable">
+                <tr>
+                  <td colspan="9">Loading notifications...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div id="projects" class="section">
@@ -920,27 +930,29 @@
             onkeyup="filterTable('projectsTable', 'projectsSearch')"
           />
 
-          <table
-            border="1"
-            width="100%"
-            style="border-collapse: collapse; text-align: center"
-          >
-            <thead>
-              <tr>
-                <th>Project Name</th>
-                <th>Client</th>
-                <th>Services</th>
-                <th>Status</th>
-                <th>Web</th>
-                <th>Seo</th>
-                <th>SMO</th>
-                <th>Ads</th>
-                <th>App</th>
-                <th>ERP/CRM</th>
-              </tr>
-            </thead>
-            <tbody id="projectsTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="border-collapse: collapse; text-align: center"
+            >
+              <thead>
+                <tr>
+                  <th>Project Name</th>
+                  <th>Client</th>
+                  <th>Services</th>
+                  <th>Status</th>
+                  <th>Web</th>
+                  <th>Seo</th>
+                  <th>SMO</th>
+                  <th>Ads</th>
+                  <th>App</th>
+                  <th>ERP/CRM</th>
+                </tr>
+              </thead>
+              <tbody id="projectsTable"></tbody>
+            </table>
+          </div>
 
           <div class="project-summary">
             <h3>Project Assignments Summary</h3>
@@ -1216,29 +1228,31 @@
             onkeyup="filterTable('teamTable', 'teamSearch')"
           />
 
-          <table
-            border="1"
-            width="100%"
-            style="
-              margin-top: 10px;
-              text-align: center;
-              border-collapse: collapse;
-            "
-          >
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Total Leads</th>
-                <th>Appointments</th>
-                <th>Followups</th>
-                <th>Action</th>
-                <th>Update</th>
-              </tr>
-            </thead>
-            <tbody id="teamTable"></tbody>
-          </table>
+          <div class="table-responsive admin-section-table">
+            <table
+              border="1"
+              width="100%"
+              style="
+                margin-top: 10px;
+                text-align: center;
+                border-collapse: collapse;
+              "
+            >
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Total Leads</th>
+                  <th>Appointments</th>
+                  <th>Followups</th>
+                  <th>Action</th>
+                  <th>Update</th>
+                </tr>
+              </thead>
+              <tbody id="teamTable"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="salary" class="section">
@@ -2107,7 +2121,7 @@
     </div>
     <script src="project-tracker.js"></script>
     <script src="payroll-management.js?v=20260524-fixed-commission"></script>
-    <script src="admin.js?v=20260525-renewals"></script>
+    <script src="admin.js?v=20260526-mobile-layout"></script>
     <script src="admin-proposals.js?v=20260523-proposal-email-auto"></script>
     <script src="leave-management.js"></script>
     <script src="crm-security.js?v=20260526-redsea-name"></script>
