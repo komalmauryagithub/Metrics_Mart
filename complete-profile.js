@@ -167,20 +167,27 @@ function validateProfileFormFiles(form) {
     "resume_file",
     "experience_file",
     "certification_file",
+    "documents",
   ];
 
   for (const fieldName of fileFields) {
     const input = form?.elements?.[fieldName];
-    const file = input?.files?.[0];
-    if (!file) continue;
+    const files = Array.from(input?.files || []);
+    if (!files.length) continue;
 
-    if (file.size > PROFILE_FORM_MAX_FILE_SIZE) {
-      return `${getFileInputLabel(input)} must be 15 MB or smaller.`;
+    if (fieldName === "documents" && files.length > 10) {
+      return "Other Documents can include up to 10 files.";
     }
 
-    const extension = getFileExtension(file.name);
-    if (extension && !PROFILE_FORM_ALLOWED_EXTENSIONS.has(extension)) {
-      return `${getFileInputLabel(input)} must be JPG, PNG, WEBP, HEIC, PDF, DOC or DOCX.`;
+    for (const file of files) {
+      if (file.size > PROFILE_FORM_MAX_FILE_SIZE) {
+        return `${getFileInputLabel(input)} must be 15 MB or smaller.`;
+      }
+
+      const extension = getFileExtension(file.name);
+      if (extension && !PROFILE_FORM_ALLOWED_EXTENSIONS.has(extension)) {
+        return `${getFileInputLabel(input)} must be JPG, PNG, WEBP, HEIC, PDF, DOC or DOCX.`;
+      }
     }
   }
 
@@ -312,6 +319,10 @@ function populateForm(user) {
   setFieldHint(
     "certificationFileHint",
     user.certification_file ? "Certification file already saved. Upload only if you want to replace it." : "",
+  );
+  setFieldHint(
+    "documentsHint",
+    user.other_documents ? "Other documents already saved. Upload more only if required." : "",
   );
 
   togglePfFields();
