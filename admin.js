@@ -71,8 +71,8 @@ const BASE_URL =
     window.location.protocol === "file:" || ["localhost", "127.0.0.1"].includes(window.location.hostname)
         ? "http://localhost:3000"
         : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
-const REDSEA_ADMIN_PROFILE_IMAGE = "uploads/profile-pics/redsea-admin-profile.jpeg";
-const METRICS_ADMIN_PROFILE_IMAGE = "uploads/profile-pics/metrics-admin-profile.jpeg";
+const REDSEA_ADMIN_PROFILE_IMAGE = "uploads/redsea-admin-profile.jpeg";
+const METRICS_ADMIN_PROFILE_IMAGE = "uploads/metrics-admin-profile.jpeg";
 
 function normalizeAdminPanelCompanyKey(value) {
     const normalized = String(value || "")
