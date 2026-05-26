@@ -2001,7 +2001,7 @@ async function loadAttendance() {
     const result = await attendanceRes.json();
     const rows = result.success ? result.data || [] : [];
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
     const canCheckOut = todayRow && !todayRow.check_out;
@@ -2955,7 +2955,11 @@ function normalizeLeadCompanyScope(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-  if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+  if (
+    normalized === "redsea" ||
+    normalized === "redseadigitals" ||
+    normalized === "redseadigitalspvtltd"
+  ) return "redsea";
   if (
     normalized === "metrics" ||
     normalized === "metricsmart" ||
