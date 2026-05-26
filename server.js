@@ -4,6 +4,8 @@ const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2");
 const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const streamifier = require("streamifier");
 const { Resend } = require("resend");
 const path = require("path");
 const fs = require("fs");
@@ -948,10 +950,11 @@ const registrationPrimaryUploadFolders = Object.freeze({
   resume_file: "resumes",
   experience_file: "experience-documents",
   certification_file: "certifications",
+  other_documents: "registration-documents",
 });
 
 const registrationUploadFieldAliases = Object.freeze({
-  prof_img: ["prof_img", "profile_img", "profile_image", "photo", "avatar"],
+  prof_img: ["prof_img", "profile_pic", "profile_img", "profile_image", "photo", "avatar"],
   aadhar_img: ["aadhar_img", "aadhar_image", "aadhar_file", "aadhar_card"],
   pan_img: ["pan_img", "pan_image", "pan_file", "pan_card"],
   cancelled_cheque: [
@@ -972,6 +975,13 @@ const registrationUploadFieldAliases = Object.freeze({
     "certificate_file",
     "certification_doc",
     "certificate_doc",
+  ],
+  other_documents: [
+    "other_documents",
+    "documents",
+    "document",
+    "other_document",
+    "other_docs",
   ],
 });
 
@@ -1002,6 +1012,116 @@ function getSafeUploadBaseName(originalName, fallback = "file") {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 48) || fallback;
+}
+
+function getUploadFolderNameForField(fieldName) {
+  return registrationUploadFolders[fieldName] || "registration-documents";
+}
+
+const cloudinaryUploadConfig = {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+};
+
+const isCloudinaryConfigured = Boolean(
+  cloudinaryUploadConfig.cloud_name &&
+    cloudinaryUploadConfig.api_key &&
+    cloudinaryUploadConfig.api_secret,
+);
+
+if (isCloudinaryConfigured) {
+  cloudinary.config(cloudinaryUploadConfig);
+}
+
+function normalizeCloudinaryFolderPath(value) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) =>
+      segment
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, ""),
+    )
+    .filter(Boolean)
+    .join("/");
+}
+
+function getCloudinaryUploadFolder(folderName) {
+  const prefix = normalizeCloudinaryFolderPath(
+    process.env.CLOUDINARY_FOLDER_PREFIX || "metrics-mart",
+  );
+  const folder = normalizeCloudinaryFolderPath(folderName || "uploads") || "uploads";
+
+  return [prefix, folder].filter(Boolean).join("/");
+}
+
+function getUploadedFileAbsolutePath(uploadedFile) {
+  if (!uploadedFile) return "";
+
+  const candidatePath =
+    uploadedFile.path ||
+    (uploadedFile.destination && uploadedFile.filename
+      ? path.join(uploadedFile.destination, uploadedFile.filename)
+      : "");
+
+  if (!candidatePath) return "";
+
+  return path.isAbsolute(candidatePath)
+    ? candidatePath
+    : path.resolve(__dirname, candidatePath);
+}
+
+function uploadBufferToCloudinary(fileBuffer, folderName, originalName = "upload") {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: getCloudinaryUploadFolder(folderName),
+        resource_type: "auto",
+        filename_override: originalName,
+        use_filename: true,
+        unique_filename: true,
+        overwrite: false,
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(result);
+      },
+    );
+
+    streamifier.createReadStream(fileBuffer).pipe(uploadStream);
+  });
+}
+
+async function uploadMulterFileToCloudinary(uploadedFile, folderName) {
+  if (!isCloudinaryConfigured || !uploadedFile) return null;
+
+  const targetFolder = folderName || getUploadFolderNameForField(uploadedFile.fieldname);
+
+  if (uploadedFile.buffer) {
+    return uploadBufferToCloudinary(
+      uploadedFile.buffer,
+      targetFolder,
+      uploadedFile.originalname || uploadedFile.filename || "upload",
+    );
+  }
+
+  const absolutePath = getUploadedFileAbsolutePath(uploadedFile);
+  if (!absolutePath) return null;
+
+  return cloudinary.uploader.upload(absolutePath, {
+    folder: getCloudinaryUploadFolder(targetFolder),
+    resource_type: "auto",
+    use_filename: true,
+    unique_filename: true,
+    overwrite: false,
+  });
 }
 
 const storage = multer.diskStorage({
@@ -1067,14 +1187,18 @@ const upload = multer({
   },
 });
 
+const registrationMultiUploadFields = new Set(
+  registrationUploadFieldAliases.other_documents || [],
+);
+
 const userRegistrationUpload = upload.fields(
   Object.keys(registrationUploadFolders).map((fieldName) => ({
     name: fieldName,
-    maxCount: 1,
+    maxCount: registrationMultiUploadFields.has(fieldName) ? 10 : 1,
   })),
 );
 
-function normalizeUploadedFilePath(uploadedFile) {
+function normalizeUploadedFilePath(uploadedFile, folderName = "") {
   if (!uploadedFile) return null;
 
   const candidatePath =
@@ -1094,13 +1218,40 @@ function normalizeUploadedFilePath(uploadedFile) {
     }
   }
 
-  const folderName = registrationUploadFolders[uploadedFile.fieldname] || "";
-  return ["uploads", folderName, uploadedFile.filename]
+  const resolvedFolderName =
+    folderName || registrationUploadFolders[uploadedFile.fieldname] || "";
+  return ["uploads", resolvedFolderName, uploadedFile.filename]
     .filter(Boolean)
     .join("/");
 }
 
-function getUploadedFilePath(files, fieldName) {
+function formatPublicUploadUrl(filePath) {
+  const value = String(filePath || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+
+  return `/${value.replace(/\\/g, "/").replace(/^\/+/, "")}`;
+}
+
+async function resolveUploadedFilePath(uploadedFile, folderName = "") {
+  if (!uploadedFile) return null;
+
+  const targetFolder =
+    folderName || getUploadFolderNameForField(uploadedFile.fieldname);
+  const localPath = normalizeUploadedFilePath(uploadedFile, targetFolder);
+
+  if (!isCloudinaryConfigured) return localPath;
+
+  try {
+    const result = await uploadMulterFileToCloudinary(uploadedFile, targetFolder);
+    return result?.secure_url || result?.url || localPath;
+  } catch (err) {
+    console.error("Cloudinary upload failed:", err);
+    return localPath;
+  }
+}
+
+async function getUploadedFilePath(files, fieldName) {
   const fieldNames = registrationUploadFieldAliases[fieldName] || [fieldName];
 
   for (const candidateField of fieldNames) {
@@ -1109,11 +1260,88 @@ function getUploadedFilePath(files, fieldName) {
       : null;
 
     if (uploadedFile) {
-      return normalizeUploadedFilePath(uploadedFile);
+      return resolveUploadedFilePath(
+        uploadedFile,
+        getUploadFolderNameForField(candidateField),
+      );
     }
   }
 
   return null;
+}
+
+async function getUploadedFilePaths(files, fieldName) {
+  const fieldNames = registrationUploadFieldAliases[fieldName] || [fieldName];
+  const uploadedFiles = [];
+
+  for (const candidateField of fieldNames) {
+    if (Array.isArray(files?.[candidateField])) {
+      uploadedFiles.push(
+        ...files[candidateField].map((file) => ({
+          file,
+          folderName: getUploadFolderNameForField(candidateField),
+        })),
+      );
+    }
+  }
+
+  const paths = [];
+  for (const item of uploadedFiles) {
+    const uploadedPath = await resolveUploadedFilePath(item.file, item.folderName);
+    if (uploadedPath) paths.push(uploadedPath);
+  }
+
+  return paths;
+}
+
+function parseStoredDocumentList(value) {
+  let source = value;
+
+  if (typeof source === "string") {
+    const trimmed = source.trim();
+    if (!trimmed) return [];
+
+    try {
+      source = JSON.parse(trimmed);
+    } catch (_err) {
+      source = trimmed;
+    }
+  }
+
+  const list = Array.isArray(source) ? source : source ? [source] : [];
+
+  return list
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        return String(item.url || item.path || item.file || "").trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function serializeStoredDocumentList(documents) {
+  const uniqueDocuments = [
+    ...new Set(
+      (Array.isArray(documents) ? documents : [])
+        .map((documentPath) => String(documentPath || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  return uniqueDocuments.length ? JSON.stringify(uniqueDocuments) : null;
+}
+
+async function getMergedOtherDocuments(files, existingValue = null) {
+  const uploadedDocuments = await getUploadedFilePaths(files, "other_documents");
+  if (!uploadedDocuments.length) return existingValue || null;
+
+  return serializeStoredDocumentList([
+    ...parseStoredDocumentList(existingValue),
+    ...uploadedDocuments,
+  ]);
 }
 
 function getDatabaseErrorMessage(err, fallback = "Database error") {
@@ -2289,7 +2517,7 @@ function buildProfileSetupSectionHtml(title, rows) {
 }
 
 function buildProfileSetupDocumentRows(req, profile) {
-  return [
+  const primaryRows = [
     ["Profile image", profile.prof_img],
     ["Aadhar image", profile.aadhar_img],
     ["PAN image", profile.pan_img],
@@ -2297,7 +2525,12 @@ function buildProfileSetupDocumentRows(req, profile) {
     ["Resume", profile.resume_file],
     ["Experience letter", profile.experience_file],
     ["Certification file", profile.certification_file],
-  ].map(([label, filePath]) => {
+  ];
+  const otherRows = parseStoredDocumentList(profile.other_documents).map(
+    (filePath, index) => [`Other document ${index + 1}`, filePath],
+  );
+
+  return [...primaryRows, ...otherRows].map(([label, filePath]) => {
     const fileUrl = buildProfileSetupFileUrl(req, filePath);
     return {
       label,
@@ -3148,6 +3381,21 @@ const uploadLeave = multer({
     }
   },
 });
+
+const leaveAttachmentFieldNames = [
+  "attachment",
+  "leave_attachment",
+  "leaveAttachment",
+  "file",
+  "document",
+];
+
+const uploadLeaveAttachment = uploadLeave.fields(
+  leaveAttachmentFieldNames.map((fieldName) => ({
+    name: fieldName,
+    maxCount: 1,
+  })),
+);
 
 // ====================== DATABASE CONNECTION ======================
 
@@ -4252,6 +4500,7 @@ async function ensureUserRegistrationColumns() {
     "ALTER TABLE users ADD COLUMN resume_file varchar(999) DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN experience_file varchar(999) DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN certification_file varchar(999) DEFAULT NULL",
+    "ALTER TABLE users ADD COLUMN other_documents longtext DEFAULT NULL AFTER certification_file",
   ];
 
   for (const sql of schemaChanges) {
@@ -5220,9 +5469,21 @@ function calculateLeaveTotalDays(fromDate, toDate, leaveType) {
   return diffInDays > 0 ? diffInDays : NaN;
 }
 
-function normalizeLeaveAttachment(file) {
+async function normalizeLeaveAttachment(file) {
   if (!file?.filename) return null;
-  return `uploads/leaves/${file.filename}`.replace(/\\/g, "/");
+  return resolveUploadedFilePath(file, "leaves");
+}
+
+function getFirstUploadedFileFromFields(files, fieldNames = []) {
+  for (const fieldName of fieldNames) {
+    const uploadedFile = Array.isArray(files?.[fieldName])
+      ? files[fieldName][0]
+      : null;
+
+    if (uploadedFile) return uploadedFile;
+  }
+
+  return null;
 }
 
 async function getUserRecordById(userId) {
@@ -7042,13 +7303,17 @@ app.post("/register", (req, res) => {
       ? normalizeDateOnlyValue(req.body.pf_joining_date) || null
       : null;
     const createdBy = Number(req.body.created_by || req.body.updated_by || 0) || null;
-    const profImg = getUploadedFilePath(req.files, "prof_img");
-    const aadharImg = getUploadedFilePath(req.files, "aadhar_img");
-    const panImg = getUploadedFilePath(req.files, "pan_img");
-    const cancelledCheque = getUploadedFilePath(req.files, "cancelled_cheque");
-    const resumeFile = getUploadedFilePath(req.files, "resume_file");
-    const experienceFile = getUploadedFilePath(req.files, "experience_file");
-    const certificationFile = getUploadedFilePath(req.files, "certification_file");
+    const profImg = await getUploadedFilePath(req.files, "prof_img");
+    const aadharImg = await getUploadedFilePath(req.files, "aadhar_img");
+    const panImg = await getUploadedFilePath(req.files, "pan_img");
+    const cancelledCheque = await getUploadedFilePath(req.files, "cancelled_cheque");
+    const resumeFile = await getUploadedFilePath(req.files, "resume_file");
+    const experienceFile = await getUploadedFilePath(req.files, "experience_file");
+    const certificationFile = await getUploadedFilePath(
+      req.files,
+      "certification_file",
+    );
+    const otherDocuments = await getMergedOtherDocuments(req.files);
 
     if (!name || !email || !contact || !spswd || !cpswd || !role || !compName) {
       return res.status(400).json({
@@ -7133,9 +7398,10 @@ app.post("/register", (req, res) => {
         pf_joining_date,
         resume_file,
         experience_file,
-        certification_file
+        certification_file,
+        other_documents
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     try {
@@ -7188,6 +7454,7 @@ app.post("/register", (req, res) => {
         resumeFile,
         experienceFile,
         certificationFile,
+        otherDocuments,
       ]);
 
       const createdUserId = Number(insertResult.insertId || 0);
@@ -7268,6 +7535,7 @@ async function getProfileSetupUserByToken(token) {
           u.resume_file,
           u.experience_file,
           u.certification_file,
+          u.other_documents,
           u.attendance_face_enrolled_at,
           u.skills,
           u.profile_setup_status,
@@ -7321,6 +7589,7 @@ async function getProfileSetupUserByToken(token) {
         resume_file,
         experience_file,
         certification_file,
+        other_documents,
         attendance_face_enrolled_at,
         skills,
         profile_setup_status,
@@ -7553,24 +7822,33 @@ app.post("/api/profile-setup/:token", (req, res) => {
       }
 
       const profImg =
-        getUploadedFilePath(req.files, "prof_img") || user.prof_img || null;
+        (await getUploadedFilePath(req.files, "prof_img")) || user.prof_img || null;
       const aadharImg =
-        getUploadedFilePath(req.files, "aadhar_img") || user.aadhar_img || null;
-      const panImg = getUploadedFilePath(req.files, "pan_img") || user.pan_img || null;
+        (await getUploadedFilePath(req.files, "aadhar_img")) ||
+        user.aadhar_img ||
+        null;
+      const panImg =
+        (await getUploadedFilePath(req.files, "pan_img")) || user.pan_img || null;
       const cancelledCheque =
-        getUploadedFilePath(req.files, "cancelled_cheque") ||
+        (await getUploadedFilePath(req.files, "cancelled_cheque")) ||
         user.cancelled_cheque ||
         null;
       const resumeFile =
-        getUploadedFilePath(req.files, "resume_file") || user.resume_file || null;
+        (await getUploadedFilePath(req.files, "resume_file")) ||
+        user.resume_file ||
+        null;
       const experienceFile =
-        getUploadedFilePath(req.files, "experience_file") ||
+        (await getUploadedFilePath(req.files, "experience_file")) ||
         user.experience_file ||
         null;
       const certificationFile =
-        getUploadedFilePath(req.files, "certification_file") ||
+        (await getUploadedFilePath(req.files, "certification_file")) ||
         user.certification_file ||
         null;
+      const otherDocuments = await getMergedOtherDocuments(
+        req.files,
+        user.other_documents,
+      );
 
       if (!aadharNo) {
         return res.status(400).json({
@@ -7633,6 +7911,7 @@ app.post("/api/profile-setup/:token", (req, res) => {
             resume_file = ?,
             experience_file = ?,
             certification_file = ?,
+            other_documents = ?,
             skills = ?,
             profile_setup_status = 'completed',
             profile_setup_token_hash = NULL,
@@ -7663,6 +7942,7 @@ app.post("/api/profile-setup/:token", (req, res) => {
           resumeFile,
           experienceFile,
           certificationFile,
+          otherDocuments,
           JSON.stringify(skills),
           user.id,
         ],
@@ -7699,6 +7979,7 @@ app.post("/api/profile-setup/:token", (req, res) => {
         resume_file: resumeFile,
         experience_file: experienceFile,
         certification_file: certificationFile,
+        other_documents: otherDocuments,
         skills: JSON.stringify(skills),
       };
       const notificationDispatch = await sendProfileSetupCompletionEmail(
@@ -7725,6 +8006,154 @@ app.post("/api/profile-setup/:token", (req, res) => {
       res.status(err.statusCode || 500).json({
         success: false,
         message: err.statusCode ? err.message : "Failed to submit profile details",
+      });
+    }
+  });
+});
+
+app.post("/submit-profile-form", (req, res) => {
+  userRegistrationUpload(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      const message =
+        uploadErr instanceof multer.MulterError
+          ? uploadErr.code === "LIMIT_FILE_SIZE"
+            ? "Each profile file must be 15 MB or smaller."
+            : uploadErr.message
+          : uploadErr.message || "Failed to upload profile files";
+
+      return res.status(400).json({
+        success: false,
+        message,
+      });
+    }
+
+    const userId = Number(
+      req.body.user_id ||
+        req.body.userId ||
+        req.body.id ||
+        req.query.user_id ||
+        req.query.userId ||
+        req.query.id ||
+        0,
+    );
+    const email = String(req.body.email || req.query.email || "").trim();
+
+    if (!userId && !email) {
+      return res.status(400).json({
+        success: false,
+        message: "User id or registered email is required",
+      });
+    }
+
+    try {
+      await ensureUserRegistrationColumns();
+
+      const [users] = await dbPromise.query(
+        `
+          SELECT
+            id,
+            prof_img,
+            aadhar_img,
+            pan_img,
+            cancelled_cheque,
+            resume_file,
+            experience_file,
+            certification_file,
+            other_documents
+          FROM users
+          WHERE ${userId ? "id = ?" : "LOWER(TRIM(email)) = LOWER(TRIM(?))"}
+          LIMIT 1
+        `,
+        [userId || email],
+      );
+
+      if (!users.length) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found for this profile form",
+        });
+      }
+
+      const existingUser = users[0];
+      const profImg =
+        (await getUploadedFilePath(req.files, "prof_img")) ||
+        existingUser.prof_img ||
+        null;
+      const aadharImg =
+        (await getUploadedFilePath(req.files, "aadhar_img")) ||
+        existingUser.aadhar_img ||
+        null;
+      const panImg =
+        (await getUploadedFilePath(req.files, "pan_img")) ||
+        existingUser.pan_img ||
+        null;
+      const cancelledCheque =
+        (await getUploadedFilePath(req.files, "cancelled_cheque")) ||
+        existingUser.cancelled_cheque ||
+        null;
+      const resumeFile =
+        (await getUploadedFilePath(req.files, "resume_file")) ||
+        existingUser.resume_file ||
+        null;
+      const experienceFile =
+        (await getUploadedFilePath(req.files, "experience_file")) ||
+        existingUser.experience_file ||
+        null;
+      const certificationFile =
+        (await getUploadedFilePath(req.files, "certification_file")) ||
+        existingUser.certification_file ||
+        null;
+      const otherDocuments = await getMergedOtherDocuments(
+        req.files,
+        existingUser.other_documents,
+      );
+
+      await dbPromise.query(
+        `
+          UPDATE users
+          SET
+            prof_img = ?,
+            aadhar_img = ?,
+            pan_img = ?,
+            cancelled_cheque = ?,
+            resume_file = ?,
+            experience_file = ?,
+            certification_file = ?,
+            other_documents = ?
+          WHERE id = ?
+        `,
+        [
+          profImg,
+          aadharImg,
+          panImg,
+          cancelledCheque,
+          resumeFile,
+          experienceFile,
+          certificationFile,
+          otherDocuments,
+          existingUser.id,
+        ],
+      );
+
+      res.json({
+        success: true,
+        message: "Form submitted successfully",
+        data: {
+          prof_img: profImg,
+          aadhar_img: aadharImg,
+          pan_img: panImg,
+          cancelled_cheque: cancelledCheque,
+          resume_file: resumeFile,
+          experience_file: experienceFile,
+          certification_file: certificationFile,
+          other_documents: parseStoredDocumentList(otherDocuments),
+        },
+      });
+    } catch (error) {
+      console.error("Profile Form Upload Error:", error);
+      res.status(500).json({
+        success: false,
+        message: "File upload failed",
       });
     }
   });
@@ -8447,6 +8876,7 @@ app.get("/api/admin/users/:id", async (req, res) => {
           resume_file,
           experience_file,
           certification_file,
+          other_documents,
           attendance_face_enrolled_at,
           profile_setup_status,
           DATE_FORMAT(profile_setup_expires_at, '%Y-%m-%d %H:%i:%s') AS profile_setup_expires_at,
@@ -8546,6 +8976,7 @@ app.get("/api/hr/employees", async (req, res) => {
           u.resume_file,
           u.experience_file,
           u.certification_file,
+          u.other_documents,
           u.pf_enabled,
           u.pf_number,
           u.uan_number,
@@ -8590,7 +9021,7 @@ app.get("/api/hr/employees", async (req, res) => {
       success: true,
       data: rows.map((row) => {
         const statusDetails = getProfileSetupStatusDetails(row);
-        const documentFields = [
+        const requiredDocumentFields = [
           row.aadhar_img,
           row.pan_img,
           row.cancelled_cheque,
@@ -8598,15 +9029,21 @@ app.get("/api/hr/employees", async (req, res) => {
           row.experience_file,
           row.certification_file,
         ];
-        const documentsPresent = documentFields.filter(Boolean).length;
+        const requiredDocumentsPresent = requiredDocumentFields.filter(Boolean).length;
+        const optionalDocumentsPresent =
+          parseStoredDocumentList(row.other_documents).length;
+        const documentsPresent = requiredDocumentsPresent + optionalDocumentsPresent;
 
         return {
           ...row,
           profile_setup_status: statusDetails.status,
           profile_setup_link_expired: statusDetails.isExpired,
           documents_present: documentsPresent,
-          documents_required: documentFields.length,
-          documents_missing: documentFields.length - documentsPresent,
+          documents_required: requiredDocumentFields.length,
+          documents_missing: Math.max(
+            requiredDocumentFields.length - requiredDocumentsPresent,
+            0,
+          ),
         };
       }),
     });
@@ -8732,6 +9169,7 @@ app.put("/api/admin/users/:id", (req, res) => {
             resume_file,
             experience_file,
             certification_file,
+            other_documents,
             attendance_face_enrolled_at,
             role,
             comp_name,
@@ -8787,7 +9225,9 @@ app.put("/api/admin/users/:id", (req, res) => {
         ? nationality
         : existingUser.nationality || null;
       const profImg =
-        getUploadedFilePath(req.files, "prof_img") || existingUser.prof_img || null;
+        (await getUploadedFilePath(req.files, "prof_img")) ||
+        existingUser.prof_img ||
+        null;
       const nextEmail = hasBodyField(req.body, "email")
         ? email
         : String(existingUser.email || "").trim();
@@ -8801,23 +9241,33 @@ app.put("/api/admin/users/:id", (req, res) => {
         ? address
         : existingUser.address || null;
       const aadharImg =
-        getUploadedFilePath(req.files, "aadhar_img") || existingUser.aadhar_img || null;
+        (await getUploadedFilePath(req.files, "aadhar_img")) ||
+        existingUser.aadhar_img ||
+        null;
       const panImg =
-        getUploadedFilePath(req.files, "pan_img") || existingUser.pan_img || null;
+        (await getUploadedFilePath(req.files, "pan_img")) ||
+        existingUser.pan_img ||
+        null;
       const cancelledCheque =
-        getUploadedFilePath(req.files, "cancelled_cheque") ||
+        (await getUploadedFilePath(req.files, "cancelled_cheque")) ||
         existingUser.cancelled_cheque ||
         null;
       const resumeFile =
-        getUploadedFilePath(req.files, "resume_file") || existingUser.resume_file || null;
+        (await getUploadedFilePath(req.files, "resume_file")) ||
+        existingUser.resume_file ||
+        null;
       const experienceFile =
-        getUploadedFilePath(req.files, "experience_file") ||
+        (await getUploadedFilePath(req.files, "experience_file")) ||
         existingUser.experience_file ||
         null;
       const certificationFile =
-        getUploadedFilePath(req.files, "certification_file") ||
+        (await getUploadedFilePath(req.files, "certification_file")) ||
         existingUser.certification_file ||
         null;
+      const otherDocuments = await getMergedOtherDocuments(
+        req.files,
+        existingUser.other_documents,
+      );
       const nextAadharNo = hasBodyField(req.body, "aadhar_no")
         ? aadharNo || null
         : existingUser.aadhar_no || null;
@@ -9002,7 +9452,8 @@ app.put("/api/admin/users/:id", (req, res) => {
           pf_joining_date = ?,
           resume_file = ?,
           experience_file = ?,
-          certification_file = ?
+          certification_file = ?,
+          other_documents = ?
       `;
       const params = [
         nextEmployeeCode,
@@ -9045,6 +9496,7 @@ app.put("/api/admin/users/:id", (req, res) => {
         resumeFile,
         experienceFile,
         certificationFile,
+        otherDocuments,
       ];
 
       if (nextPassword) {
@@ -9145,6 +9597,7 @@ app.get("/api/me/:id", async (req, res) => {
           resume_file,
           experience_file,
           certification_file,
+          other_documents,
           profile_setup_status,
           DATE_FORMAT(profile_setup_expires_at, '%Y-%m-%d %H:%i:%s') AS profile_setup_expires_at,
           DATE_FORMAT(profile_setup_sent_at, '%Y-%m-%d %H:%i:%s') AS profile_setup_sent_at,
@@ -9880,7 +10333,7 @@ app.put(
     } = req.body;
 
     const payment_proof = req.file
-      ? "uploads/payments/" + req.file.filename
+      ? await resolveUploadedFilePath(req.file, "payments")
       : null;
 
     let validatedProducts = [];
@@ -12244,44 +12697,59 @@ async function handleLeaveStatusUpdate(req, res, forcedStatus = "") {
   }
 }
 
-app.post("/api/leaves/apply", async (req, res) => {
-  const userId = Number(req.body.userId);
-  const leaveType = normalizeLeaveType(req.body.leaveType);
-  const fromDate = String(req.body.fromDate || "").trim();
-  const toDate = String(req.body.toDate || "").trim();
-  const reason = String(req.body.reason || "").trim();
-
-  if (!userId || !leaveType || !fromDate || !toDate || !reason) {
-    return res.status(400).json({
-      success: false,
-      message: "All leave details are required",
-    });
-  }
-
-  try {
-    await ensureLeaveRequestsTable();
-    const user = await getUserRecordById(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-      });
-    }
-
-    const totalDays = calculateLeaveTotalDays(fromDate, toDate, leaveType);
-    if (!Number.isFinite(totalDays) || totalDays <= 0) {
+app.post("/api/leaves/apply", (req, res) => {
+  uploadLeaveAttachment(req, res, async (uploadErr) => {
+    if (uploadErr) {
       return res.status(400).json({
         success: false,
-        message: "Please select valid leave dates",
+        message: uploadErr.message || "Failed to upload leave attachment",
       });
     }
 
-    const approvalChain = await resolveLeaveApprovalChain(user);
-    const role = normalizeRoleValue(user.role || req.body.role || "employee");
+    const userId = Number(req.body.userId);
+    const leaveType = normalizeLeaveType(req.body.leaveType);
+    const fromDate = String(req.body.fromDate || "").trim();
+    const toDate = String(req.body.toDate || "").trim();
+    const reason = String(req.body.reason || "").trim();
 
-    const [result] = await dbPromise.query(
-      `
+    if (!userId || !leaveType || !fromDate || !toDate || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: "All leave details are required",
+      });
+    }
+
+    try {
+      await ensureLeaveRequestsTable();
+      const user = await getUserRecordById(userId);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found",
+        });
+      }
+
+      const totalDays = calculateLeaveTotalDays(fromDate, toDate, leaveType);
+      if (!Number.isFinite(totalDays) || totalDays <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Please select valid leave dates",
+        });
+      }
+
+      const approvalChain = await resolveLeaveApprovalChain(user);
+      const role = normalizeRoleValue(user.role || req.body.role || "employee");
+      const leaveAttachmentFile = getFirstUploadedFileFromFields(
+        req.files,
+        leaveAttachmentFieldNames,
+      );
+      const attachment = leaveAttachmentFile
+        ? await normalizeLeaveAttachment(leaveAttachmentFile)
+        : null;
+
+      const [result] = await dbPromise.query(
+        `
         INSERT INTO leave_requests (
           user_id,
           employee_name,
@@ -12308,45 +12776,47 @@ app.post("/api/leaves/apply", async (req, res) => {
           admin_reviewer_name,
           admin_reviewed_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
       `,
-      [
-        user.id,
-        user.name || "Employee",
-        role,
-        leaveType,
-        fromDate,
-        toDate,
-        Number(totalDays.toFixed(2)),
-        reason,
-        approvalChain.approvalRoute,
-        approvalChain.approvalStage,
-        approvalChain.leaderUser?.id || null,
-        approvalChain.leaderUser?.name || null,
-        approvalChain.leaderUser?.email || null,
-        approvalChain.leaderStatus,
-      ],
-    );
+        [
+          user.id,
+          user.name || "Employee",
+          role,
+          leaveType,
+          fromDate,
+          toDate,
+          Number(totalDays.toFixed(2)),
+          reason,
+          attachment,
+          approvalChain.approvalRoute,
+          approvalChain.approvalStage,
+          approvalChain.leaderUser?.id || null,
+          approvalChain.leaderUser?.name || null,
+          approvalChain.leaderUser?.email || null,
+          approvalChain.leaderStatus,
+        ],
+      );
 
-    const leaveRequest = await getLeaveRequestById(result.insertId);
-    const successMessage = approvalChain.fallbackReason
-      ? `Leave request sent to admin because ${approvalChain.fallbackReason}.`
-      : approvalChain.approvalRoute === "leader"
-        ? `Leave request sent to ${approvalChain.leaderUser?.name || "your group leader"} for approval`
-        : "Leave request sent to admin for approval";
+      const leaveRequest = await getLeaveRequestById(result.insertId);
+      const successMessage = approvalChain.fallbackReason
+        ? `Leave request sent to admin because ${approvalChain.fallbackReason}.`
+        : approvalChain.approvalRoute === "leader"
+          ? `Leave request sent to ${approvalChain.leaderUser?.name || "your group leader"} for approval`
+          : "Leave request sent to admin for approval";
 
-    res.json({
-      success: true,
-      message: successMessage,
-      data: leaveRequest,
-    });
-  } catch (err) {
-    console.error("Apply leave error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to submit leave request",
-    });
-  }
+      res.json({
+        success: true,
+        message: successMessage,
+        data: leaveRequest,
+      });
+    } catch (err) {
+      console.error("Apply leave error:", err);
+      res.status(500).json({
+        success: false,
+        message: "Failed to submit leave request",
+      });
+    }
+  });
 });
 
 app.get("/api/leaves/my/:userId", async (req, res) => {
@@ -16340,13 +16810,19 @@ app.post(
           });
         }
 
-        const attachments = files.map((file) => ({
-          name: String(file.originalname || file.filename || "file").slice(0, 255),
-          url: `/uploads/project-phases/${file.filename}`.replace(/\\/g, "/"),
-          type: String(file.mimetype || "").slice(0, 120),
-          size: Number(file.size || 0),
-          uploaded_at: new Date().toISOString(),
-        }));
+        const attachments = await Promise.all(
+          files.map(async (file) => {
+            const uploadedUrl = await resolveUploadedFilePath(file, "project-phases");
+
+            return {
+              name: String(file.originalname || file.filename || "file").slice(0, 255),
+              url: formatPublicUploadUrl(uploadedUrl),
+              type: String(file.mimetype || "").slice(0, 120),
+              size: Number(file.size || 0),
+              uploaded_at: new Date().toISOString(),
+            };
+          }),
+        );
 
         res.json({
           success: true,
