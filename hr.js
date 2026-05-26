@@ -736,6 +736,40 @@ function renderHrProfileFileCard(label, filePath) {
   `;
 }
 
+function parseHrProfileDocumentList(value) {
+  let source = value;
+
+  if (typeof source === "string") {
+    const trimmed = source.trim();
+    if (!trimmed) return [];
+
+    try {
+      source = JSON.parse(trimmed);
+    } catch {
+      source = trimmed;
+    }
+  }
+
+  const list = Array.isArray(source) ? source : source ? [source] : [];
+
+  return list
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        return String(item.url || item.path || item.file || "").trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function renderHrOtherDocumentCards(value) {
+  return parseHrProfileDocumentList(value)
+    .map((filePath, index) => renderHrProfileFileCard(`Other document ${index + 1}`, filePath))
+    .join("");
+}
+
 function renderHrEmployeeProfileDetails(employee = {}) {
   const body = document.getElementById("hrEmployeeProfileBody");
   const title = document.getElementById("hrEmployeeProfileTitle");
@@ -822,6 +856,7 @@ function renderHrEmployeeProfileDetails(employee = {}) {
         ${renderHrProfileFileCard("Resume", employee.resume_file)}
         ${renderHrProfileFileCard("Experience letter", employee.experience_file)}
         ${renderHrProfileFileCard("Certification file", employee.certification_file)}
+        ${renderHrOtherDocumentCards(employee.other_documents)}
       </div>
     </section>
   `;
@@ -997,7 +1032,7 @@ async function resolveHrFallbackAdminId() {
 }
 
 function mapLegacyUserToHrEmployee(user) {
-  const documentFields = [
+  const requiredDocumentFields = [
     user?.aadhar_img,
     user?.pan_img,
     user?.cancelled_cheque,
@@ -1005,7 +1040,9 @@ function mapLegacyUserToHrEmployee(user) {
     user?.experience_file,
     user?.certification_file,
   ];
-  const documentsPresent = documentFields.filter(Boolean).length;
+  const requiredDocumentsPresent = requiredDocumentFields.filter(Boolean).length;
+  const documentsPresent =
+    requiredDocumentsPresent + parseHrProfileDocumentList(user?.other_documents).length;
 
   return {
     ...user,
@@ -1015,8 +1052,11 @@ function mapLegacyUserToHrEmployee(user) {
       "General",
     profile_setup_status: user?.profile_setup_status || "pending",
     documents_present: documentsPresent,
-    documents_required: documentFields.length,
-    documents_missing: Math.max(documentFields.length - documentsPresent, 0),
+    documents_required: requiredDocumentFields.length,
+    documents_missing: Math.max(
+      requiredDocumentFields.length - requiredDocumentsPresent,
+      0,
+    ),
     is_on_leave_today: 0,
     today_leave_type: null,
     attendance_status: "not_marked",
@@ -1276,7 +1316,7 @@ function hydrateEmployeesWithOperationalData(employees, attendanceRows, leaveRow
   return employees.map((employee) => {
     const attendanceRow = attendanceMap.get(Number(employee.id || 0)) || {};
     const leaveRow = leaveMap.get(Number(employee.id || 0)) || null;
-    const documentFields = [
+    const requiredDocumentFields = [
       employee?.aadhar_img,
       employee?.pan_img,
       employee?.cancelled_cheque,
@@ -1284,9 +1324,12 @@ function hydrateEmployeesWithOperationalData(employees, attendanceRows, leaveRow
       employee?.experience_file,
       employee?.certification_file,
     ];
-    const computedDocumentsPresent = documentFields.filter(Boolean).length;
+    const requiredDocumentsPresent = requiredDocumentFields.filter(Boolean).length;
+    const computedDocumentsPresent =
+      requiredDocumentsPresent +
+      parseHrProfileDocumentList(employee?.other_documents).length;
     const documentsRequired =
-      Number(employee?.documents_required || 0) || documentFields.length || 1;
+      Number(employee?.documents_required || 0) || requiredDocumentFields.length || 1;
     const documentsPresent =
       Number(employee?.documents_present || 0) || computedDocumentsPresent;
 
@@ -1307,7 +1350,7 @@ function hydrateEmployeesWithOperationalData(employees, attendanceRows, leaveRow
       today_leave_type: employee?.today_leave_type || leaveRow?.leave_type || null,
       documents_present: documentsPresent,
       documents_required: documentsRequired,
-      documents_missing: Math.max(documentsRequired - documentsPresent, 0),
+      documents_missing: Math.max(documentsRequired - requiredDocumentsPresent, 0),
       profile_setup_status: employee?.profile_setup_status || "pending",
     };
   });
