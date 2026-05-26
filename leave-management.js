@@ -29,6 +29,16 @@
   let adminSearchTimer = null;
   let leaveLeaderEmails = {};
 
+  function getLocalDateKey(date = new Date()) {
+    const safeDate = date instanceof Date ? date : new Date(date);
+    if (Number.isNaN(safeDate.getTime())) return "";
+
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, "0");
+    const day = String(safeDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   async function init() {
     if (ensurePanelOnBackendOrigin()) {
       return;
@@ -121,7 +131,7 @@
       return BASE_URL.trim().replace(/\/+$/, "");
     }
 
-    return origin || "https://metrics-mart.onrender.com";
+    return origin || "https://metrics-mart-gf6l.onrender.com";
   }
 
   async function requestJson(url, options = {}, fallbackMessage = "Request failed") {
@@ -1090,7 +1100,7 @@
     if (!modal || !form) return;
 
     form.reset();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateKey();
     const fromDateInput = document.getElementById("leaveFromDate");
     const toDateInput = document.getElementById("leaveToDate");
 
