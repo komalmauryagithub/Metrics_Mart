@@ -7,13 +7,13 @@
     <link rel="icon" type="image/png" href="logo_.png" />
     <link rel="stylesheet" href="admin.css" />
     <link rel="stylesheet" href="hr.css" />
-    <link rel="stylesheet" href="crm-security.css?v=20260526-table-scroll" />
+    <link rel="stylesheet" href="crm-security.css?v=20260526-fixed-sidebar" />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
     />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script defer src="hr.js?v=20260524-fixed-commission"></script>
+    <script defer src="hr.js?v=20260526-no-leave-system"></script>
     <script defer src="crm-security.js?v=20260526-redsea-name"></script>
   </head>
   <body>
@@ -53,7 +53,7 @@
             <i class="fas fa-user-plus"></i> Recruitment
           </li>
           <li data-section="attendance">
-            <i class="fas fa-calendar-check"></i> Attendance & Leave Management
+            <i class="fas fa-calendar-check"></i> Attendance Management
           </li>
           <li data-section="payroll">
             <i class="fas fa-wallet"></i> Payroll
@@ -131,9 +131,9 @@
               <small>Joined during the current month</small>
             </article>
             <article class="metric-card dashboard-link-card" data-dashboard-target="attendance">
-              <span>Employees on Leave</span>
-              <strong id="metricEmployeesOnLeave">0</strong>
-              <small>Approved leave cases for today</small>
+              <span>Checkout Pending</span>
+              <strong id="metricCheckoutPending">0</strong>
+              <small>Employees yet to check out today</small>
             </article>
             <article class="metric-card dashboard-link-card" data-dashboard-target="recruitment">
               <span>Open Positions</span>
@@ -172,7 +172,7 @@
               <div class="panel-head">
                 <div>
                   <h3>Attendance Status</h3>
-                  <p>Present, late, half-day, and leave visibility</p>
+                  <p>Present, late, half-day, and checkout visibility</p>
                 </div>
               </div>
               <canvas id="hrAttendanceChart"></canvas>
@@ -193,11 +193,11 @@
             <article class="panel-card dashboard-link-card" data-dashboard-target="attendance">
               <div class="panel-head">
                 <div>
-                  <h3>Employees on Leave</h3>
-                  <p>Who is currently away from work</p>
+                  <h3>Attendance Exceptions</h3>
+                  <p>Late, half-day, absent, and checkout-pending cases</p>
                 </div>
               </div>
-              <div id="employeesOnLeaveList" class="stack-list"></div>
+              <div id="attendanceExceptionsList" class="stack-list"></div>
             </article>
 
             <article class="panel-card dashboard-link-card" data-dashboard-target="tasks">
@@ -396,9 +396,9 @@
         <section id="attendance" class="hr-section">
           <div class="section-head">
             <div>
-              <span class="section-kicker">Attendance & Leave Management</span>
-              <h2>Daily Attendance, Shifts & Leave Control</h2>
-              <p>Watch daily attendance, shifts, leave approvals, leave balances, and attendance exception patterns.</p>
+              <span class="section-kicker">Attendance Management</span>
+              <h2>Daily Attendance & Shift Control</h2>
+              <p>Watch daily attendance, shift expectations, checkout status, and attendance exception patterns.</p>
             </div>
           </div>
 
@@ -439,41 +439,6 @@
             </article>
           </div>
 
-          <div class="panel-grid two-up">
-            <article class="panel-card">
-              <div class="panel-head">
-                <div>
-                  <h3>Leave Applications & Approvals</h3>
-                  <p>Pending queue, approval status, and current leave context</p>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Employee</th>
-                      <th>Role</th>
-                      <th>Type</th>
-                      <th>Dates</th>
-                      <th>Status</th>
-                      <th>Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody id="leaveQueueBody"></tbody>
-                </table>
-              </div>
-            </article>
-
-            <article class="panel-card">
-              <div class="panel-head">
-                <div>
-                  <h3>Leave Balance Tracking</h3>
-                  <p>Available leave, carry-forward, and monthly credit balance</p>
-                </div>
-              </div>
-              <div id="leaveBalanceGrid" class="card-grid"></div>
-            </article>
-          </div>
         </section>
 
         <section id="payroll" class="hr-section">
@@ -527,7 +492,7 @@
             <div class="panel-head">
               <div>
                 <h3>Deductions & Taxes Snapshot</h3>
-                <p>Leave deductions, penalty exposure, and average payout health</p>
+                  <p>Attendance deductions, penalty exposure, and average payout health</p>
               </div>
             </div>
             <div id="payrollDeductionGrid" class="card-grid"></div>
@@ -680,7 +645,7 @@
           <div class="section-head">
             <div>
               <h2>Operational Reports & Decision Signals</h2>
-              <p>Summaries that help HR review headcount, attendance, leave, payroll, and compliance direction.</p>
+              <p>Summaries that help HR review headcount, attendance, payroll, and compliance direction.</p>
             </div>
           </div>
 
