@@ -349,7 +349,11 @@ function normalizeMeLeadCompanyScope(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-  if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+  if (
+    normalized === "redsea" ||
+    normalized === "redseadigitals" ||
+    normalized === "redseadigitalspvtltd"
+  ) return "redsea";
   if (
     normalized === "metrics" ||
     normalized === "metricsmart" ||
@@ -1443,7 +1447,7 @@ async function loadMeDashboard() {
 
     const attendanceRows =
       attendance?.success && Array.isArray(attendance.data) ? attendance.data : [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     meDashboardState.attendanceToday =
       attendanceRows.find((row) => row.attendance_date === today) || null;
 
@@ -3060,7 +3064,7 @@ async function fetchAttendance() {
         requestData.activeZone || requestData.officeZone || { ...ATTENDANCE_GEOFENCE, type: "office", label: "Office" },
     };
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
     const canCheckOut = todayRow && !todayRow.check_out;
@@ -4359,7 +4363,7 @@ async function saveDealClosed() {
     formData.append("payment_notes", notes || "");
     formData.append("closed_by", currentUser.id);
     formData.append("received_by", currentUser.name || "");
-    formData.append("payment_date", new Date().toISOString().slice(0, 10));
+    formData.append("payment_date", formatDateKey(new Date()));
     formData.append("products", JSON.stringify(products));
     if (approvedDownsaleRequest?.id) {
       formData.append("downsale_approval_id", approvedDownsaleRequest.id);
