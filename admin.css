@@ -5021,4 +5021,163 @@ body.modal-open {
     }
 }
 
+/* Targeted responsive fixes */
+tbody tr:hover {
+    transform: none;
+}
+
+.admin-section-table {
+    border-radius: 12px;
+    margin-bottom: 30px;
+}
+
+.admin-section-table > table {
+    margin-bottom: 0;
+    min-width: max(760px, 100%);
+    table-layout: auto;
+    white-space: nowrap;
+}
+
+#deals .admin-section-table > table,
+#notifications .admin-section-table > table,
+#projects .admin-section-table > table,
+#team .admin-section-table > table {
+    min-width: max(900px, 100%);
+}
+
+.role-badge {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    line-height: 1;
+    white-space: nowrap;
+    width: max-content;
+}
+
+#teamTable td:nth-child(3) {
+    white-space: nowrap;
+}
+
+.invoice-actions {
+    flex-wrap: nowrap;
+    min-width: max-content;
+}
+
+.invoice-actions .invoice-btn {
+    flex: 0 0 34px;
+}
+
+.admin-proposal-shell,
+.admin-proposal-form,
+.admin-proposal-editor-panel,
+.admin-proposal-list-panel {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.admin-proposal-form-grid > *,
+.admin-proposal-form-grid input,
+.admin-proposal-form-grid textarea {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.admin-proposal-editor {
+    max-width: 100%;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.admin-proposal-list-panel .table-wrapper {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.admin-proposal-list-panel .data-table {
+    min-width: max(820px, 100%);
+}
+
+@media (max-width: 768px) {
+    .header {
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+
+    .header-left {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .brand-logo {
+        width: min(42vw, 170px) !important;
+        max-width: 170px;
+    }
+
+    .header-right {
+        width: auto;
+        flex: 0 0 auto;
+        justify-content: flex-end;
+        gap: 7px;
+    }
+
+    .welcome {
+        display: none;
+    }
+
+    .user-info {
+        gap: 6px;
+    }
+
+    .avatar {
+        width: 34px;
+        height: 34px;
+    }
+
+    .role {
+        padding: 6px 9px;
+        font-size: 11px;
+    }
+
+    .logout-btn {
+        padding: 8px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .admin-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .invoice-actions {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 6px;
+    }
+
+    .admin-proposal-form,
+    .admin-proposal-editor-panel,
+    .admin-proposal-list-panel {
+        padding: 12px;
+    }
+
+    .admin-proposal-toolbar-actions,
+    .admin-proposal-table-actions {
+        flex-wrap: nowrap;
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+}
+
+@media (max-width: 380px) {
+    .brand-logo {
+        width: min(38vw, 145px) !important;
+    }
+
+    .logout-btn {
+        padding: 8px;
+    }
+}
+
 
