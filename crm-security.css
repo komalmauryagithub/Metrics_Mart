@@ -566,3 +566,141 @@ body {
     min-width: 640px;
   }
 }
+
+:where(
+  .table-responsive,
+  .table-wrapper,
+  .table-wrap,
+  .accounts-table-wrap,
+  .leave-table-wrapper,
+  .payroll-table-wrap,
+  .project-tracker-phase-table-wrap,
+  [class*="table-wrap"],
+  [class*="table-wrapper"]
+) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+
+@media (max-width: 900px) {
+  html,
+  body,
+  .dashboard-container,
+  .main-content,
+  .section,
+  .section.active,
+  .panel-card,
+  .admin-panel,
+  .dashboard-panel,
+  .modal-content {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+
+  :where(
+    .table-responsive,
+    .table-wrapper,
+    .table-wrap,
+    .accounts-table-wrap,
+    .leave-table-wrapper,
+    .payroll-table-wrap,
+    .project-tracker-phase-table-wrap,
+    [class*="table-wrap"],
+    [class*="table-wrapper"]
+  ) {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+  }
+
+  :where(
+    .table-responsive,
+    .table-wrapper,
+    .table-wrap,
+    .accounts-table-wrap,
+    .leave-table-wrapper,
+    .payroll-table-wrap,
+    .project-tracker-phase-table-wrap,
+    [class*="table-wrap"],
+    [class*="table-wrapper"]
+  ) > table {
+    width: max-content !important;
+    min-width: max(720px, 100%) !important;
+    max-width: none !important;
+    white-space: nowrap;
+  }
+
+  :where(
+    .main-content,
+    .section,
+    .section.active,
+    .panel-card,
+    .admin-panel,
+    .dashboard-panel,
+    .modal-content,
+    .form-card,
+    .leave-table-card,
+    .payroll-table-panel
+  ) > table {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+  }
+
+  :where(
+    .main-content,
+    .section,
+    .section.active,
+    .panel-card,
+    .admin-panel,
+    .dashboard-panel,
+    .modal-content,
+    .form-card,
+    .leave-table-card,
+    .payroll-table-panel
+  ) > table > :is(thead, tbody, tfoot) {
+    display: table !important;
+    width: max-content !important;
+    min-width: max(720px, 100%) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  :where(
+    .table-responsive,
+    .table-wrapper,
+    .table-wrap,
+    .accounts-table-wrap,
+    .leave-table-wrapper,
+    .payroll-table-wrap,
+    .project-tracker-phase-table-wrap,
+    [class*="table-wrap"],
+    [class*="table-wrapper"]
+  ) > table,
+  :where(
+    .main-content,
+    .section,
+    .section.active,
+    .panel-card,
+    .admin-panel,
+    .dashboard-panel,
+    .modal-content,
+    .form-card,
+    .leave-table-card,
+    .payroll-table-panel
+  ) > table > :is(thead, tbody, tfoot) {
+    min-width: max(640px, 100%) !important;
+  }
+}
