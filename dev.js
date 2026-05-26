@@ -1115,7 +1115,7 @@ async function fetchDevAttendanceSummary() {
     });
     const result = await res.json();
     const rows = result?.success && Array.isArray(result.data) ? result.data : [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     const todayRow = rows.find((row) => row.attendance_date === today) || null;
     devDashboardTodayAttendance = todayRow;
 
@@ -1160,7 +1160,7 @@ async function fetchAttendance() {
     const res = await fetch(`${BASE_URL}/api/attendance/${currentUser.id}`);
     const result = await res.json();
     const rows = result.success ? result.data || [] : [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
     const canCheckOut = todayRow && !todayRow.check_out;
