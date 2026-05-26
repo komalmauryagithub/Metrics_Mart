@@ -114,15 +114,45 @@
       throw new Error("Camera is not supported in this browser.");
     }
 
-    activeStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-        width: { ideal: 640 },
-        height: { ideal: 640 },
+    const cameraConstraints = [
+      {
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: 640 },
+          height: { ideal: 640 },
+        },
+        audio: false,
       },
-      audio: false,
-    });
+      {
+        video: {
+          facingMode: "user",
+        },
+        audio: false,
+      },
+      {
+        video: true,
+        audio: false,
+      },
+    ];
 
+    let lastError = null;
+    for (const constraints of cameraConstraints) {
+      try {
+        activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!activeStream) {
+      throw lastError || new Error("Camera open nahi ho paya.");
+    }
+
+    videoElement.setAttribute("playsinline", "");
+    videoElement.setAttribute("webkit-playsinline", "");
+    videoElement.muted = true;
+    videoElement.playsInline = true;
     videoElement.srcObject = activeStream;
     await videoElement.play();
   }
