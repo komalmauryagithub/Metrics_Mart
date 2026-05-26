@@ -41,6 +41,12 @@ function loadLocalEnv() {
 loadLocalEnv();
 
 const PORT = Number(process.env.PORT || 3000);
+const APP_TIME_ZONE =
+  process.env.APP_TIME_ZONE ||
+  process.env.APP_TIMEZONE ||
+  process.env.TZ ||
+  "Asia/Kolkata";
+const APP_DB_TIMEZONE = process.env.DB_TIMEZONE || "+05:30";
 const LOCAL_BASE_URL = `http://localhost:${PORT}`;
 const RENDER_EXTERNAL_HOSTNAME_URL = process.env.RENDER_EXTERNAL_HOSTNAME
   ? `https://${String(process.env.RENDER_EXTERNAL_HOSTNAME).trim().replace(/^https?:\/\//, "")}`
@@ -3124,6 +3130,7 @@ function getDatabaseConfig() {
     waitForConnections: true,
     connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
     queueLimit: 0,
+    timezone: APP_DB_TIMEZONE,
   };
 }
 
@@ -5958,13 +5965,14 @@ function getAttendanceStatusLabelSql(attAlias = "a", userAlias = "u") {
 
 function getAttendanceWorkingHoursSql(attAlias = "a", userAlias = "u") {
   const missingCheckoutSql = getAttendanceMissingCheckoutSql(attAlias, userAlias);
+  const currentDateTimeSql = `TIMESTAMP('${getAppDateTimeParts().dateTimeSql}')`;
   return `CASE
     WHEN ${attAlias}.check_in IS NULL THEN '00:00'
     WHEN ${missingCheckoutSql} THEN 'Pending'
     ELSE CONCAT(
-      FLOOR(TIMESTAMPDIFF(SECOND, ${attAlias}.check_in, COALESCE(${attAlias}.check_out, NOW())) / 3600),
+      FLOOR(TIMESTAMPDIFF(SECOND, ${attAlias}.check_in, COALESCE(${attAlias}.check_out, ${currentDateTimeSql})) / 3600),
       ':',
-      LPAD(FLOOR((TIMESTAMPDIFF(SECOND, ${attAlias}.check_in, COALESCE(${attAlias}.check_out, NOW())) % 3600) / 60), 2, '0')
+      LPAD(FLOOR((TIMESTAMPDIFF(SECOND, ${attAlias}.check_in, COALESCE(${attAlias}.check_out, ${currentDateTimeSql})) % 3600) / 60), 2, '0')
     )
   END`;
 }
@@ -6015,6 +6023,48 @@ function minutesToTimeString(totalMinutes) {
   const hours = Math.floor(normalizedMinutes / 60);
   const minutes = normalizedMinutes % 60;
   return `${padAttendanceTimeSegment(hours)}:${padAttendanceTimeSegment(minutes)}:00`;
+}
+
+function getAppDateTimeParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(safeDate)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+  const timeKey = `${hour}:${parts.minute}:${parts.second}`;
+
+  return {
+    dateKey,
+    timeKey,
+    dateTimeSql: `${dateKey} ${timeKey}`,
+  };
+}
+
+function addDaysToDateKey(dateKey, days) {
+  const normalizedDate = String(dateKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    return getAttendanceDateKey();
+  }
+
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+  return date.toISOString().slice(0, 10);
 }
 
 function toRadians(value) {
@@ -6118,11 +6168,14 @@ function normalizeAttendanceRadiusMeters(
 }
 
 function getAttendanceDateKey(dateValue = new Date()) {
-  if (dateValue instanceof Date) {
-    return dateValue.toISOString().slice(0, 10);
+  if (typeof dateValue === "string") {
+    const normalizedDate = dateValue.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(normalizedDate)) {
+      return normalizedDate.slice(0, 10);
+    }
   }
 
-  return String(dateValue || "").slice(0, 10);
+  return getAppDateTimeParts(dateValue).dateKey;
 }
 
 function buildAttendanceLocationRequestPayload(row) {
@@ -6434,11 +6487,12 @@ function getAttendanceShiftConfigForRole(role, logoutTime = "18:00:00") {
 function isAttendanceDateAutoAbsent(attendanceDate, shiftEnd, now = new Date()) {
   if (!attendanceDate) return false;
 
-  const todayKey = now.toISOString().slice(0, 10);
+  const currentAppTime = getAppDateTimeParts(now);
+  const todayKey = currentAppTime.dateKey;
   if (attendanceDate < todayKey) return true;
   if (attendanceDate > todayKey) return false;
 
-  const currentTime = now.toTimeString().slice(0, 8);
+  const currentTime = currentAppTime.timeKey;
   return currentTime > normalizeAttendanceTimeString(shiftEnd);
 }
 
@@ -6537,16 +6591,7 @@ function parseAttendanceCheckoutDate(value) {
 }
 
 function formatAttendanceDateTimeForSql(value) {
-  const date = parseAttendanceCheckoutDate(value);
-  return [
-    date.getFullYear(),
-    padAttendanceTimeSegment(date.getMonth() + 1),
-    padAttendanceTimeSegment(date.getDate()),
-  ].join("-") + " " + [
-    padAttendanceTimeSegment(date.getHours()),
-    padAttendanceTimeSegment(date.getMinutes()),
-    padAttendanceTimeSegment(date.getSeconds()),
-  ].join(":");
+  return getAppDateTimeParts(parseAttendanceCheckoutDate(value)).dateTimeSql;
 }
 
 function getAttendanceAutoCheckoutKey(userId, sessionId) {
@@ -6581,6 +6626,7 @@ async function finalizeAttendanceCheckout({
   await ensureAttendanceTable();
   await ensureUserShiftColumns();
 
+  const attendanceTodayKey = getAttendanceDateKey();
   const targetSql = scope === "latest_open"
     ? `
       SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date
@@ -6592,11 +6638,14 @@ async function finalizeAttendanceCheckout({
     : `
       SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date
       FROM attendance
-      WHERE user_id = ? AND attendance_date = CURDATE() AND check_in IS NOT NULL
+      WHERE user_id = ? AND attendance_date = ? AND check_in IS NOT NULL
       LIMIT 1
     `;
 
-  const [attendanceRows] = await dbPromise.query(targetSql, [normalizedUserId]);
+  const targetParams = scope === "latest_open"
+    ? [normalizedUserId]
+    : [normalizedUserId, attendanceTodayKey];
+  const [attendanceRows] = await dbPromise.query(targetSql, targetParams);
   const attendanceDate = attendanceRows[0]?.attendance_date || "";
 
   if (!attendanceDate) {
@@ -6694,17 +6743,19 @@ function getAttendanceMonthStart(dateString) {
 
 function getAttendanceDateRange(startDate, endDate) {
   const range = [];
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
+  const start = String(startDate || "").trim();
+  const end = String(endDate || "").trim();
 
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(end) ||
+    start > end
+  ) {
     return range;
   }
 
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    range.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
+  for (let cursor = start; cursor <= end; cursor = addDaysToDateKey(cursor, 1)) {
+    range.push(cursor);
   }
 
   return range;
@@ -7624,7 +7675,11 @@ function normalizeLoginCompanyKey(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-  if (normalized === "redsea" || normalized === "redseadigitals") {
+  if (
+    normalized === "redsea" ||
+    normalized === "redseadigitals" ||
+    normalized === "redseadigitalspvtltd"
+  ) {
     return "redsea";
   }
 
@@ -7640,7 +7695,9 @@ function normalizeLoginCompanyKey(value) {
 }
 
 function getLoginCompanyName(companyKey) {
-  return companyKey === "redsea" ? "RedSea" : "Metrics Mart Infoline Pvt Ltd";
+  return companyKey === "redsea"
+    ? "Red Sea Digitals Pvt. Ltd"
+    : "Metrics Mart Infoline Pvt Ltd";
 }
 
 function getLoginCompanyCondition(companyKey) {
@@ -7648,7 +7705,7 @@ function getLoginCompanyCondition(companyKey) {
     return {
       sql: `
         AND LOWER(REPLACE(TRIM(COALESCE(comp_name, '')), ' ', '')) IN
-          ('redsea', 'redseadigitals')
+          ('redsea', 'redseadigitals', 'redseadigitalspvtltd')
       `,
       params: [],
     };
@@ -7680,7 +7737,7 @@ function getRequestedCompanyScope(req) {
 function getRedSeaUserScopeSql(userAlias = "u") {
   return `
     LOWER(REPLACE(TRIM(COALESCE(${userAlias}.comp_name, '')), ' ', '')) IN
-      ('redsea', 'redseadigitals')
+      ('redsea', 'redseadigitals', 'redseadigitalspvtltd')
   `;
 }
 
@@ -7705,7 +7762,7 @@ function getRedSeaLeadScopeSql(leadAlias = "l") {
   return `
     (
       LOWER(REPLACE(TRIM(COALESCE(${leadAlias}.company_scope, '')), ' ', '')) IN
-        ('redsea', 'redseadigitals')
+        ('redsea', 'redseadigitals', 'redseadigitalspvtltd')
       OR EXISTS (
         SELECT 1
         FROM users company_scope_user
@@ -8387,6 +8444,7 @@ app.get("/api/hr/employees", async (req, res) => {
     await ensurePayrollUserColumns();
 
     const attendanceStatusSql = getAttendanceStatusSql("a", "u");
+    const todayKey = getAttendanceDateKey();
     const userWhereParts = [
       "LOWER(TRIM(COALESCE(u.role, ''))) <> 'admin'",
     ];
@@ -8448,14 +8506,14 @@ app.get("/api/hr/employees", async (req, res) => {
         FROM users u
         LEFT JOIN attendance a
           ON a.user_id = u.id
-          AND a.attendance_date = CURDATE()
+          AND a.attendance_date = ?
         LEFT JOIN (
           SELECT
             lr.user_id,
             MAX(lr.leave_type) AS leave_type
           FROM leave_requests lr
           WHERE lr.status = 'approved'
-            AND CURDATE() BETWEEN lr.from_date AND lr.to_date
+            AND ? BETWEEN lr.from_date AND lr.to_date
           GROUP BY lr.user_id
         ) lt ON lt.user_id = u.id
         WHERE ${userWhereParts.join("\n          AND ")}
@@ -8464,6 +8522,7 @@ app.get("/api/hr/employees", async (req, res) => {
           u.name ASC,
           u.id ASC
       `,
+      [todayKey, todayKey],
     );
 
     res.json({
@@ -10707,12 +10766,8 @@ app.get("/api/attendance/:userId", async (req, res) => {
     }
 
     const now = new Date();
-    const endDate = new Date(now);
-    const startDate = new Date(now);
-    startDate.setDate(startDate.getDate() - 30);
-    const startDateKey = clampAttendanceTrackingStart(startDate.toISOString().slice(0, 10));
-    const clampedStartDate = new Date(`${startDateKey}T00:00:00`);
-    const endDateKey = endDate.toISOString().slice(0, 10);
+    const endDateKey = getAttendanceDateKey(now);
+    const startDateKey = clampAttendanceTrackingStart(addDaysToDateKey(endDateKey, -30));
     const shiftConfig = getAttendanceShiftConfigForRole(
       userRows[0].role,
       userRows[0].logout_time,
@@ -10745,8 +10800,11 @@ app.get("/api/attendance/:userId", async (req, res) => {
     const attendanceMap = new Map(rows.map((row) => [row.attendance_date, row]));
     const filledRows = [];
 
-    for (let cursor = new Date(endDate); cursor >= clampedStartDate; cursor.setDate(cursor.getDate() - 1)) {
-      const attendanceDate = cursor.toISOString().slice(0, 10);
+    for (
+      let attendanceDate = endDateKey;
+      attendanceDate >= startDateKey;
+      attendanceDate = addDaysToDateKey(attendanceDate, -1)
+    ) {
       const existingRow = attendanceMap.get(attendanceDate);
 
       if (existingRow) {
@@ -10820,11 +10878,13 @@ app.post("/api/attendance/check-in", async (req, res) => {
   }
 
   try {
+    const attendanceNow = getAppDateTimeParts();
     const locationAccess = await validateAttendanceAccessLocation({
       userId,
       lat,
       lng,
       accuracyMeters,
+      attendanceDate: attendanceNow.dateKey,
     });
     const faceVerification = await verifyAttendanceFaceForUser(userId, req.body);
     await ensureAttendanceTable();
@@ -10840,12 +10900,7 @@ app.post("/api/attendance/check-in", async (req, res) => {
           TIME_FORMAT(${shiftStartSql}, '%H:%i') AS shift_start,
           TIME_FORMAT(${shiftEndSql}, '%H:%i') AS logout_time,
           TIME_FORMAT(${graceEndSql}, '%H:%i') AS late_after,
-          ${requiredHoursSql} AS required_hours,
-          TIME(NOW()) > ${graceEndSql} AS is_late,
-          (
-            TIME(NOW()) > ${shiftStartSql}
-            AND TIME(NOW()) <= ${graceEndSql}
-          ) AS is_grace
+          ${requiredHoursSql} AS required_hours
         FROM users u
         WHERE id = ?
       `,
@@ -10856,10 +10911,16 @@ app.post("/api/attendance/check-in", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid user id" });
     }
 
-    const attendanceStatus = Number(shiftRows[0].is_late) ? "late" : "present";
-    const responseStatus = Number(shiftRows[0].is_late)
+    const currentTime = attendanceNow.timeKey;
+    const isLate =
+      currentTime > normalizeAttendanceTimeString(shiftRows[0].late_after);
+    const isGrace =
+      currentTime > normalizeAttendanceTimeString(shiftRows[0].shift_start) &&
+      currentTime <= normalizeAttendanceTimeString(shiftRows[0].late_after);
+    const attendanceStatus = isLate ? "late" : "present";
+    const responseStatus = isLate
       ? "late"
-      : Number(shiftRows[0].is_grace)
+      : isGrace
         ? "grace"
         : "present";
 
@@ -10873,10 +10934,10 @@ app.post("/api/attendance/check-in", async (req, res) => {
         check_in_location,
         status
       )
-      VALUES (?, CURDATE(), NOW(), ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         status = IF(check_in IS NULL, VALUES(status), status),
-        check_in = IF(check_in IS NULL, NOW(), check_in),
+        check_in = IF(check_in IS NULL, VALUES(check_in), check_in),
         check_in_lat = IF(check_in_lat IS NULL, VALUES(check_in_lat), check_in_lat),
         check_in_lng = IF(check_in_lng IS NULL, VALUES(check_in_lng), check_in_lng),
         check_in_location = IF(check_in_location IS NULL, VALUES(check_in_location), check_in_location)
@@ -10884,6 +10945,8 @@ app.post("/api/attendance/check-in", async (req, res) => {
 
     await dbPromise.query(sql, [
       userId,
+      attendanceNow.dateKey,
+      attendanceNow.dateTimeSql,
       hasLocation ? lat : null,
       hasLocation ? lng : null,
       locationUrl,
@@ -10908,6 +10971,8 @@ app.post("/api/attendance/check-in", async (req, res) => {
       logout_time: shiftRows[0].logout_time,
       late_after: shiftRows[0].late_after,
       required_hours: shiftRows[0].required_hours,
+      attendance_date: attendanceNow.dateKey,
+      check_in: attendanceNow.timeKey,
       face_verified: true,
       face_score: faceVerification.score,
     });
@@ -10940,11 +11005,13 @@ app.put("/api/attendance/check-out", async (req, res) => {
   }
 
   try {
+    const attendanceNow = getAppDateTimeParts();
     const locationAccess = await validateAttendanceAccessLocation({
       userId,
       lat,
       lng,
       accuracyMeters,
+      attendanceDate: attendanceNow.dateKey,
     });
     const faceVerification = await verifyAttendanceFaceForUser(userId, req.body);
     const checkoutResult = await finalizeAttendanceCheckout({
@@ -11121,8 +11188,11 @@ app.get("/api/attendance/history/:userId", async (req, res) => {
     `;
     const params = [userId];
     const now = new Date();
-    const targetMonth = month && year ? month : (now.getMonth() + 1);
-    const targetYear = month && year ? year : now.getFullYear();
+    const currentDateKey = getAttendanceDateKey(now);
+    const currentMonth = Number(currentDateKey.slice(5, 7));
+    const currentYear = Number(currentDateKey.slice(0, 4));
+    const targetMonth = month && year ? month : currentMonth;
+    const targetYear = month && year ? year : currentYear;
     const targetMonthStartKey = `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`;
 
     if (isBeforeAttendanceTrackingStart(targetMonthStartKey)) {
@@ -11130,7 +11200,7 @@ app.get("/api/attendance/history/:userId", async (req, res) => {
     }
 
     let rangeStartDay = 1;
-    let rangeEndDay = new Date(targetYear, targetMonth, 0).getDate();
+    let rangeEndDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
 
     if (targetMonth && targetYear) {
       sql += ` AND MONTH(a.attendance_date) = ? AND YEAR(a.attendance_date) = ?`;
@@ -11141,7 +11211,7 @@ app.get("/api/attendance/history/:userId", async (req, res) => {
 
         if (Number.isFinite(weekNum) && weekNum > 0) {
           const startDay = ((weekNum - 1) * 7) + 1;
-          const lastDay = new Date(targetYear, targetMonth, 0).getDate();
+          const lastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
           const endDay = Math.min(startDay + 6, lastDay);
           rangeStartDay = startDay;
           rangeEndDay = endDay;
@@ -11163,8 +11233,7 @@ app.get("/api/attendance/history/:userId", async (req, res) => {
     const filledRows = [];
 
     for (let day = rangeEndDay; day >= rangeStartDay; day -= 1) {
-      const date = new Date(targetYear, targetMonth - 1, day);
-      const dateKey = date.toISOString().slice(0, 10);
+      const dateKey = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 
       if (isBeforeAttendanceTrackingStart(dateKey)) {
         continue;
@@ -11262,14 +11331,13 @@ app.get("/api/attendance/today/:userId", async (req, res) => {
           DATE_FORMAT(a.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
         FROM attendance a
         LEFT JOIN users u ON u.id = a.user_id
-        WHERE a.user_id = ? AND a.attendance_date = CURDATE()
+        WHERE a.user_id = ? AND a.attendance_date = ?
         LIMIT 1
       `,
-      [userId]
+      [userId, todayKey]
     );
 
     if (!rows.length) {
-      const todayKey = new Date().toISOString().slice(0, 10);
       const shiftConfig = getAttendanceShiftConfigForRole(
         userRows[0].role,
         userRows[0].logout_time,
@@ -11518,7 +11586,7 @@ app.post("/api/attendance/location-request", async (req, res) => {
 });
 
 app.get("/api/admin/attendance", async (req, res) => {
-  const selectedDate = String(req.query.date || new Date().toISOString().slice(0, 10));
+  const selectedDate = getAttendanceDateKey(req.query.date || new Date());
   const roleFilter = String(req.query.role || "")
     .toLowerCase()
     .trim();
@@ -11841,6 +11909,7 @@ app.put("/api/admin/attendance/location-requests/:id", async (req, res) => {
     }
 
     const requestRow = buildAttendanceLocationRequestPayload(rows[0]);
+    const attendanceNow = getAppDateTimeParts();
 
     await dbPromise.query(
       `
@@ -11850,7 +11919,7 @@ app.put("/api/admin/attendance/location-requests/:id", async (req, res) => {
           admin_remark = ?,
           reviewed_by = ?,
           reviewed_by_name = ?,
-          reviewed_at = NOW(),
+          reviewed_at = ?,
           approved_lat = ?,
           approved_lng = ?,
           approved_location_url = ?,
@@ -11863,6 +11932,7 @@ app.put("/api/admin/attendance/location-requests/:id", async (req, res) => {
         adminRemark,
         adminUser.id,
         adminUser.name || "Admin",
+        attendanceNow.dateTimeSql,
         requestedStatus === "approved" ? requestRow.requestedLat : null,
         requestedStatus === "approved" ? requestRow.requestedLng : null,
         requestedStatus === "approved"
@@ -11926,7 +11996,8 @@ app.put("/api/admin/attendance/resolve", async (req, res) => {
       });
     }
 
-    const nowTime = new Date().toTimeString().slice(0, 8);
+    const attendanceNow = getAppDateTimeParts();
+    const nowTime = attendanceNow.timeKey;
     const checkInTime = attendanceRows[0].check_in_time || nowTime;
     const resolvedTime = nowTime < checkInTime ? checkInTime : nowTime;
     const resolvedCheckout = `${attendanceDate} ${resolvedTime}`;
@@ -11937,11 +12008,11 @@ app.put("/api/admin/attendance/resolve", async (req, res) => {
         SET
           check_out = ?,
           admin_override_status = NULL,
-          admin_override_at = NOW(),
+          admin_override_at = ?,
           admin_override_by = ?
         WHERE user_id = ? AND attendance_date = ? AND check_in IS NOT NULL
       `,
-      [resolvedCheckout, adminId || null, userId, attendanceDate],
+      [resolvedCheckout, attendanceNow.dateTimeSql, adminId || null, userId, attendanceDate],
     );
 
     res.json({ success: true, message: "Checkout resolved using current admin time" });
@@ -11994,7 +12065,8 @@ app.put("/api/admin/attendance/override", async (req, res) => {
     const needsResolvedCheckout = Boolean(attendanceRows[0].check_in_time)
       && !attendanceRows[0].check_out
       && ["present", "grace", "late", "half_day"].includes(overrideValue || "");
-    const currentTime = new Date().toTimeString().slice(0, 8);
+    const attendanceNow = getAppDateTimeParts();
+    const currentTime = attendanceNow.timeKey;
     const resolvedTime = currentTime < (attendanceRows[0].check_in_time || currentTime)
       ? attendanceRows[0].check_in_time
       : currentTime;
@@ -12008,11 +12080,11 @@ app.put("/api/admin/attendance/override", async (req, res) => {
         SET
           check_out = COALESCE(?, check_out),
           admin_override_status = ?,
-          admin_override_at = NOW(),
+          admin_override_at = ?,
           admin_override_by = ?
         WHERE user_id = ? AND attendance_date = ?
       `,
-      [overrideCheckout, overrideValue, adminId || null, userId, attendanceDate],
+      [overrideCheckout, overrideValue, attendanceNow.dateTimeSql, adminId || null, userId, attendanceDate],
     );
 
     res.json({
