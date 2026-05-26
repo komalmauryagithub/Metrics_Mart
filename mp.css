@@ -90,6 +90,11 @@ body {
   width: min(100%, 320px);
   height: auto;
   margin: 22px auto 0;
+  filter:
+    drop-shadow(1px 0 0 #ffffff)
+    drop-shadow(-1px 0 0 #ffffff)
+    drop-shadow(0 1px 0 #ffffff)
+    drop-shadow(0 -1px 0 #ffffff);
 }
 
 /* Right Section */
