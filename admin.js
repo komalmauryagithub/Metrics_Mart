@@ -71,6 +71,54 @@ const BASE_URL =
     window.location.protocol === "file:" || ["localhost", "127.0.0.1"].includes(window.location.hostname)
         ? "http://localhost:3000"
         : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
+const REDSEA_ADMIN_PROFILE_IMAGE = "uploads/profile-pics/redsea-admin-profile.jpeg";
+
+function normalizeAdminPanelCompanyKey(value) {
+    const normalized = String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    if (
+        normalized === "redsea" ||
+        normalized === "redseadigitals" ||
+        normalized === "redseadigitalspvtltd"
+    ) {
+        return "redsea";
+    }
+
+    if (
+        normalized === "metrics" ||
+        normalized === "metricsmart" ||
+        normalized === "metricsmartinfolinepvtltd"
+    ) {
+        return "metrics";
+    }
+
+    return "";
+}
+
+function getAdminHeaderAvatarUrl(user = {}) {
+    const companyKey = normalizeAdminPanelCompanyKey(
+        user.company_key ||
+            user.selected_company ||
+            user.comp_name ||
+            new URLSearchParams(window.location.search).get("company"),
+    );
+
+    if (normalizeAdminRole(user.role) === "admin" && companyKey === "redsea") {
+        return `${BASE_URL}/${REDSEA_ADMIN_PROFILE_IMAGE}`;
+    }
+
+    const profileImage = String(user.prof_img || "").trim();
+
+    if (profileImage && profileImage.toUpperCase() !== "NULL") {
+        return profileImage.startsWith("http")
+            ? profileImage
+            : `${BASE_URL}/${profileImage}`;
+    }
+
+    return "";
+}
 
 function getAdminDateKey(value = new Date()) {
     if (typeof value === "string") {
@@ -192,11 +240,12 @@ function loadUser() {
 
     document.getElementById("userName").textContent = currentUser.name;
 
-    if (currentUser.prof_img) {
-        document.getElementById("userAvatar").src =
-            currentUser.prof_img.startsWith("http")
-                ? currentUser.prof_img
-                : `${BASE_URL}/${currentUser.prof_img}`;
+    const avatar = document.getElementById("userAvatar");
+    const avatarUrl = getAdminHeaderAvatarUrl(currentUser);
+    if (avatar && avatarUrl) {
+        avatar.src = avatarUrl;
+    } else if (avatar) {
+        avatar.removeAttribute("src");
     }
 
     return true;
@@ -1159,7 +1208,7 @@ async function handleProfileSetupInvite(profileSetup) {
         : [];
     const baseEmailMessage = String(emailDispatch.message || "").trim();
     const emailMessage = emailSent
-        ? baseEmailMessage || "Profile form email sent successfully."
+        ? "Mail sent successfully."
         : baseEmailMessage || "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
     return {
         copied: false,
@@ -1211,8 +1260,8 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
         }
 
         showPopup(
-            "Profile Form Email Sent",
-            emailDispatch.message || "Profile form email sent successfully.",
+            "Mail Sent Successfully",
+            "Mail sent successfully.",
             true,
         );
     } catch (error) {
@@ -2784,13 +2833,44 @@ async function loadTeam() {
     }
 }
 
+function normalizeAdminTeamRoleForFilter(value) {
+    const normalized = String(value || "")
+        .toLowerCase()
+        .trim()
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ");
+    const compact = normalized.replace(/\s+/g, "");
+    const aliases = {
+        all: "all",
+        admin: "admin",
+        hr: "hr",
+        humanresource: "hr",
+        humanresources: "hr",
+        tme: "tme",
+        me: "me",
+        dev: "dev",
+        developer: "dev",
+        seo: "seo",
+        smo: "smo",
+        socialmedia: "smo",
+        socialmediamarketing: "smo",
+        socialmediaoptimization: "smo",
+        acc: "accounts",
+        account: "accounts",
+        accounts: "accounts",
+    };
+
+    return aliases[normalized] || aliases[compact] || normalized;
+}
+
 function filterTeamByRole(role) {
+    const selectedRole = normalizeAdminTeamRoleForFilter(role);
 
     // Active button toggle
     document.querySelectorAll('.tab-btn').forEach(btn => {
-        const btnRole = btn.dataset.role?.toLowerCase().trim();
+        const btnRole = normalizeAdminTeamRoleForFilter(btn.dataset.role);
 
-        if (btnRole === role.toLowerCase().trim()) {
+        if (btnRole === selectedRole) {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
@@ -2803,24 +2883,13 @@ function filterTeamByRole(role) {
     // Filter logic
     let filtered = allTeamData;
 
-    if (role.toLowerCase() !== 'all') {
+    if (selectedRole !== 'all') {
         filtered = allTeamData.filter(user => {
 
             // DB role
-            const userRole = user.role?.toLowerCase().trim();
+            const userRole = normalizeAdminTeamRoleForFilter(user.role);
 
-            // Mapping
-            const roleMap = {
-                acc: 'accounts',
-                dev: 'dev',
-                hr: 'hr',
-                me: 'me',
-                tme: 'tme',
-                seo: 'seo',
-                admin: 'admin'
-            };
-
-            return userRole === roleMap[role.toLowerCase()];
+            return userRole === selectedRole;
         });
     }
 
@@ -5039,11 +5108,11 @@ if (adminRegisterForm) {
                     ? "Success"
                     : inviteResult && !inviteResult.emailSent
                         ? "User Created"
-                        : "Success";
+                        : "Mail Sent Successfully";
                 const successMessage = isEditMode
                     ? "User updated successfully"
                     : inviteResult?.emailSent
-                        ? "User created successfully. Profile form email sent successfully."
+                        ? "User created successfully. Mail sent successfully."
                         : inviteResult?.copied
                             ? "User created successfully. Profile form link copied for manual sharing."
                             : "User created successfully. Profile form link is ready for manual sharing.";
