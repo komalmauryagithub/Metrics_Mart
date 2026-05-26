@@ -72,6 +72,23 @@ const BASE_URL =
         ? "http://localhost:3000"
         : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
 
+function getAdminDateKey(value = new Date()) {
+    if (typeof value === "string") {
+        const normalized = value.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(normalized)) {
+            return normalized.slice(0, 10);
+        }
+    }
+
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
 async function parseAdminApiResponse(response, routeLabel = "Admin API") {
     const text = await response.text();
     let data = {};
@@ -210,7 +227,7 @@ function setupAdminAttendanceControls() {
     dateInput.min = "2026-05-01";
     if (dateInput.value) return;
 
-    dateInput.value = new Date().toISOString().slice(0, 10);
+    dateInput.value = getAdminDateKey();
 }
 
 function setSalesSummaryText(id, value) {
@@ -2413,7 +2430,7 @@ async function loadAdminAttendance() {
     const tbody = document.getElementById("adminAttendanceTableBody");
     if (!tbody) return;
 
-    const date = document.getElementById("adminAttendanceDate")?.value || new Date().toISOString().slice(0, 10);
+    const date = document.getElementById("adminAttendanceDate")?.value || getAdminDateKey();
     const role = document.getElementById("adminAttendanceRole")?.value || "";
     const status = document.getElementById("adminAttendanceStatusFilter")?.value || "";
     const params = new URLSearchParams({ date });
@@ -2478,7 +2495,7 @@ async function loadAdminAttendanceLocationRequests() {
     const tbody = document.getElementById("adminAttendanceRequestTableBody");
     if (!tbody || !currentUser?.id) return;
 
-    const date = document.getElementById("adminAttendanceDate")?.value || new Date().toISOString().slice(0, 10);
+    const date = document.getElementById("adminAttendanceDate")?.value || getAdminDateKey();
     const role = document.getElementById("adminAttendanceRole")?.value || "";
     const status = document.getElementById("adminAttendanceRequestStatus")?.value || "";
     const params = new URLSearchParams({
@@ -3711,7 +3728,7 @@ function formatUserDateInput(value) {
     }
 
     const date = new Date(rawValue);
-    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+    return getAdminDateKey(date);
 }
 
 function setUserFieldValue(form, fieldName, value = "") {
@@ -4109,7 +4126,11 @@ function normalizeAdminLeadCompanyScope(value) {
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
 
-    if (normalized === "redsea" || normalized === "redseadigitals") return "redsea";
+    if (
+        normalized === "redsea" ||
+        normalized === "redseadigitals" ||
+        normalized === "redseadigitalspvtltd"
+    ) return "redsea";
     if (
         normalized === "metrics" ||
         normalized === "metricsmart" ||
@@ -5076,7 +5097,7 @@ function getLeadDateValue(item = {}) {
 function toDateKey(value) {
     if (!value) return "";
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+    return getAdminDateKey(date);
 }
 
 function getDashboardStatus(item = {}) {
@@ -5112,7 +5133,7 @@ function getWeekLabels() {
         const date = new Date(today);
         date.setDate(today.getDate() - index);
         labels.push({
-            key: date.toISOString().slice(0, 10),
+            key: getAdminDateKey(date),
             label: date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
         });
     }
@@ -5494,7 +5515,7 @@ function renderAdminActivityFeed(leads, deals, followups) {
 }
 
 function renderAdminTaskOverview(followups, deals) {
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = getAdminDateKey();
     const weekAhead = new Date();
     weekAhead.setDate(weekAhead.getDate() + 7);
 
