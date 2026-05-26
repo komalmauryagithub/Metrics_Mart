@@ -2254,6 +2254,40 @@ function renderAdminProfileFileCard(label, filePath) {
     `;
 }
 
+function parseAdminProfileDocumentList(value) {
+    let source = value;
+
+    if (typeof source === "string") {
+        const trimmed = source.trim();
+        if (!trimmed) return [];
+
+        try {
+            source = JSON.parse(trimmed);
+        } catch {
+            source = trimmed;
+        }
+    }
+
+    const list = Array.isArray(source) ? source : source ? [source] : [];
+
+    return list
+        .map((item) => {
+            if (typeof item === "string") return item.trim();
+            if (item && typeof item === "object") {
+                return String(item.url || item.path || item.file || "").trim();
+            }
+
+            return "";
+        })
+        .filter(Boolean);
+}
+
+function renderAdminOtherDocumentCards(value) {
+    return parseAdminProfileDocumentList(value)
+        .map((filePath, index) => renderAdminProfileFileCard(`Other document ${index + 1}`, filePath))
+        .join("");
+}
+
 function renderAdminEmployeeProfileRecord(user = {}) {
     const container = document.getElementById("employeeProfileRecord");
     if (!container) return;
@@ -2353,6 +2387,7 @@ function renderAdminEmployeeProfileRecord(user = {}) {
                 ${renderAdminProfileFileCard("Resume", user.resume_file)}
                 ${renderAdminProfileFileCard("Experience letter", user.experience_file)}
                 ${renderAdminProfileFileCard("Certification file", user.certification_file)}
+                ${renderAdminOtherDocumentCards(user.other_documents)}
             </div>
         </section>
     `;
