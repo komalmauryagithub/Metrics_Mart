@@ -312,3 +312,257 @@ body.redsea-company .leave-action-btn.approved {
   background: #fff5f5 !important;
   color: #b91c1c !important;
 }
+
+html,
+body {
+  max-width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.header,
+.dashboard-container,
+.main-content,
+.section,
+.dashboard-panel,
+.admin-panel,
+.form-card,
+.table-card,
+.modal-content,
+.leave-shell,
+.payroll-shell,
+.project-tracker-shell {
+  min-width: 0;
+}
+
+.brand-panel,
+.role,
+.role-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.table-responsive,
+.table-wrapper,
+.accounts-table-wrap,
+.leave-table-card,
+.payroll-table-card {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive table,
+.table-wrapper table,
+.summary-table,
+.data-table,
+.admin-table,
+.accounts-table,
+.leads-table,
+.leave-table,
+.payroll-table {
+  min-width: 720px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-container {
+    display: block !important;
+    width: 100%;
+  }
+
+  .sidebar {
+    width: 100% !important;
+    max-width: 100%;
+    border-right: 0 !important;
+    border-bottom: 1px solid #e2e8f0;
+    overflow-x: auto;
+    padding: 10px 8px !important;
+  }
+
+  .sidebar ul {
+    display: flex !important;
+    flex-wrap: nowrap;
+    gap: 6px;
+    min-width: max-content;
+    padding: 0 4px !important;
+  }
+
+  .sidebar li {
+    flex: 0 0 auto;
+    border-radius: 8px;
+    padding: 10px 12px !important;
+    white-space: nowrap;
+  }
+
+  .main-content {
+    width: 100% !important;
+    padding: 16px !important;
+    overflow-x: hidden;
+  }
+
+  .dashboard-metrics,
+  .dashboard-cards,
+  .admin-kpi-grid,
+  .sales-target-strip,
+  .report-grid,
+  .attendance-summary-strip,
+  .attendance-support-grid,
+  .leave-summary-grid,
+  .payroll-kpi-grid,
+  .payroll-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .dashboard-panels,
+  .admin-dashboard-grid,
+  .admin-dashboard-bottom,
+  .target-progress-layout,
+  .form-grid,
+  .admin-proposal-form-grid,
+  .proposal-template-grid,
+  .attendance-request-modal-grid,
+  .payroll-grid,
+  .leave-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .admin-proposal-form-grid textarea,
+  .proposal-template-grid textarea {
+    grid-column: auto !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .header,
+  .header-right,
+  .user-info,
+  .dashboard-title-row,
+  .section-heading-row,
+  .admin-section-row,
+  .attendance-header,
+  .panel-heading,
+  .table-toolbar,
+  .list-header,
+  .proposal-template-header,
+  .proposal-template-actions,
+  .admin-proposal-header,
+  .admin-proposal-editor-toolbar,
+  .admin-proposal-panel-heading {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 10px;
+  }
+
+  .header {
+    padding: 12px 14px !important;
+  }
+
+  .brand-logo {
+    width: min(180px, 60vw) !important;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .dashboard-title-actions,
+  .admin-dashboard-actions,
+  .attendance-filters,
+  .attendance-actions,
+  .attendance-request-summary,
+  .admin-proposal-actions,
+  .admin-proposal-toolbar-actions,
+  .admin-proposal-table-actions,
+  .proposal-template-action-buttons,
+  .leave-actions,
+  .payroll-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .dashboard-search,
+  .search-box,
+  .attendance-filters select,
+  .attendance-filters input[type="date"],
+  .attendance-actions button,
+  .admin-dashboard-actions button,
+  .primary-action-btn,
+  .wide-action-btn,
+  .section-add-btn,
+  .save-btn,
+  .cancel-btn,
+  .submit-btn {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .dashboard-metrics,
+  .dashboard-cards,
+  .admin-kpi-grid,
+  .sales-target-strip,
+  .report-grid,
+  .attendance-summary-strip,
+  .attendance-support-grid,
+  .leave-summary-grid,
+  .payroll-kpi-grid,
+  .payroll-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .dashboard-card,
+  .stat-card,
+  .metric-card,
+  .dashboard-panel,
+  .admin-panel,
+  .form-section-card,
+  .leave-summary-card,
+  .payroll-kpi-card,
+  .payroll-panel {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .modal-content,
+  .attendance-request-modal-card,
+  .auth-modal-card {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 16px !important;
+  }
+
+  .attendance-calendar-weekdays,
+  .attendance-calendar-grid {
+    grid-template-columns: repeat(7, minmax(34px, 1fr)) !important;
+  }
+
+  .attendance-day {
+    min-height: 54px;
+    padding: 6px 4px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .main-content {
+    padding: 12px !important;
+  }
+
+  .sidebar li {
+    font-size: 13px !important;
+  }
+
+  .table-responsive table,
+  .table-wrapper table,
+  .summary-table,
+  .data-table,
+  .admin-table,
+  .accounts-table,
+  .leads-table,
+  .leave-table,
+  .payroll-table {
+    min-width: 640px;
+  }
+}
