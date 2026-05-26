@@ -187,3 +187,128 @@ body.redsea-company .status-pill,
 body.redsea-company .badge {
   border-color: #fecaca !important;
 }
+
+body.redsea-company .leave-shell,
+body.redsea-company .payroll-shell {
+  --leave-border: #fecaca;
+  --leave-shadow: 0 24px 50px rgba(153, 27, 27, 0.08);
+  --payroll-accent: #dc2626;
+  --payroll-accent-soft: rgba(220, 38, 38, 0.12);
+  --payroll-line: #fecaca;
+}
+
+body.redsea-company .leave-hero,
+body.redsea-company .leave-shell.admin-mode .leave-hero,
+body.redsea-company .leave-shell.employee-mode .leave-hero,
+body.redsea-company .payroll-hero {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.2), transparent 34%),
+    linear-gradient(135deg, #450a0a 0%, #991b1b 42%, #dc2626 100%) !important;
+  box-shadow: 0 26px 58px rgba(153, 27, 27, 0.24) !important;
+}
+
+body.redsea-company .leave-hero h2,
+body.redsea-company .leave-hero h3,
+body.redsea-company .leave-hero p,
+body.redsea-company .leave-eyebrow,
+body.redsea-company .payroll-hero h2,
+body.redsea-company .payroll-hero h3,
+body.redsea-company .payroll-hero p {
+  color: #ffffff !important;
+}
+
+body.redsea-company .leave-chip-note,
+body.redsea-company .payroll-hero-chip {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff !important;
+}
+
+body.redsea-company .leave-chip-note-soft,
+body.redsea-company .leave-ghost-btn,
+body.redsea-company .payroll-btn.secondary {
+  background: #fff5f5 !important;
+  border-color: #fecaca !important;
+  color: #991b1b !important;
+}
+
+body.redsea-company .leave-table thead th,
+body.redsea-company .payroll-table th,
+body.redsea-company .payroll-history-table th {
+  background: linear-gradient(135deg, #450a0a 0%, #991b1b 54%, #dc2626 100%) !important;
+  color: #ffffff !important;
+  border-color: #7f1d1d !important;
+}
+
+body.redsea-company .leave-table tbody tr:hover td,
+body.redsea-company .payroll-table tbody tr:hover {
+  background: #fff5f5 !important;
+}
+
+body.redsea-company .leave-search-input:focus,
+body.redsea-company .leave-select:focus,
+body.redsea-company .leave-date-input:focus,
+body.redsea-company .leave-textarea:focus,
+body.redsea-company .leave-file-input:focus,
+body.redsea-company .leave-text-input:focus,
+body.redsea-company .payroll-field input:focus,
+body.redsea-company .payroll-field select:focus,
+body.redsea-company .payroll-field textarea:focus,
+body.redsea-company .payroll-inline-input:focus {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12) !important;
+}
+
+body.redsea-company .leave-primary-btn,
+body.redsea-company .leave-modal-foot .leave-primary-btn,
+body.redsea-company .payroll-btn.primary {
+  background: linear-gradient(135deg, #991b1b 0%, #dc2626 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 14px 28px rgba(153, 27, 27, 0.18) !important;
+}
+
+body.redsea-company .payroll-btn.ghost,
+body.redsea-company .leave-link-btn,
+body.redsea-company .leave-type-badge.work_from_home {
+  background: #fee2e2 !important;
+  border-color: #fecaca !important;
+  color: #991b1b !important;
+}
+
+body.redsea-company .payroll-btn.warning {
+  background: #fff1f2 !important;
+  border-color: #fecaca !important;
+  color: #be123c !important;
+}
+
+body.redsea-company .leave-status-tab.active,
+body.redsea-company .leave-action-btn.delete {
+  background: #991b1b !important;
+  border-color: #991b1b !important;
+  color: #ffffff !important;
+}
+
+body.redsea-company .leave-summary-card,
+body.redsea-company .leave-table-card,
+body.redsea-company .payroll-kpi-card,
+body.redsea-company .payroll-panel,
+body.redsea-company .payroll-summary-tile {
+  border-color: rgba(220, 38, 38, 0.16) !important;
+  box-shadow: 0 16px 34px rgba(153, 27, 27, 0.08) !important;
+}
+
+body.redsea-company .leave-summary-card.total .leave-summary-icon,
+body.redsea-company .leave-summary-card.onleave .leave-summary-icon,
+body.redsea-company .leave-summary-card.balance .leave-summary-icon,
+body.redsea-company .leave-summary-card.credit .leave-summary-icon,
+body.redsea-company .payroll-pill {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+}
+
+body.redsea-company .leave-summary-card.approved .leave-summary-icon,
+body.redsea-company .leave-status-badge.approved,
+body.redsea-company .leave-action-btn.approved {
+  background: #fff5f5 !important;
+  color: #b91c1c !important;
+}
