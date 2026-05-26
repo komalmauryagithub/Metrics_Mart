@@ -76,7 +76,7 @@ const POLICY_LIBRARY = [
   },
   {
     title: "HR Policies",
-    detail: "Attendance, leave, conduct, and payroll policy communication zone.",
+    detail: "Attendance, conduct, and payroll policy communication zone.",
   },
   {
     title: "NDA Agreements",
@@ -360,13 +360,12 @@ async function refreshHrPanel(options = {}) {
   }
 
   try {
-    const [employeesResult, attendanceResult, leavesResult, payrollResult] =
+    const [employeesResult, attendanceResult, payrollResult] =
       await Promise.all([
         fetchHrEmployeesData(currentUser.id),
         fetchJson(
           `${BASE_URL}/api/admin/attendance?date=${encodeURIComponent(getTodayKey())}`,
         ),
-        fetchHrLeavesData(currentUser.id),
         fetchHrPayrollOverview(currentUser.id, payrollMonth),
       ]);
 
@@ -399,7 +398,7 @@ async function refreshHrPanel(options = {}) {
       hydrateEmployeesWithOperationalData(
         Array.isArray(employeesResult.data) ? employeesResult.data : [],
         Array.isArray(attendanceResult.data) ? attendanceResult.data : [],
-        Array.isArray(leavesResult.data) ? leavesResult.data : [],
+        [],
       ),
       teamReportRows,
       projectTrackerRows,
@@ -413,9 +412,9 @@ async function refreshHrPanel(options = {}) {
         summary: attendanceResult.summary || {},
       },
       leaves: {
-        data: Array.isArray(leavesResult.data) ? leavesResult.data : [],
-        summary: leavesResult.summary || {},
-        balances: Array.isArray(leavesResult.balances) ? leavesResult.balances : [],
+        data: [],
+        summary: {},
+        balances: [],
       },
       payroll: {
         data: Array.isArray(payrollResult.data) ? payrollResult.data : [],
@@ -902,10 +901,6 @@ function getDocumentCompletion(employee) {
 }
 
 function getEmployeeLifecycleStatus(employee) {
-  if (Number(employee?.is_on_leave_today || 0)) {
-    return { label: "On Leave", tone: "warn" };
-  }
-
   const profileStatus = String(employee?.profile_setup_status || "").toLowerCase();
   if (profileStatus && profileStatus !== "completed") {
     return { label: "Onboarding", tone: "info" };
@@ -1137,10 +1132,6 @@ function getRecentJoiners(limit = 5) {
     .slice(0, limit);
 }
 
-function getEmployeesOnLeaveToday() {
-  return hrState.employees.filter((employee) => Number(employee.is_on_leave_today || 0));
-}
-
 function getDepartmentStats() {
   const map = new Map();
   hrState.employees.forEach((employee) => {
@@ -1155,12 +1146,16 @@ function getDepartmentStats() {
       });
     }
     const entry = map.get(key);
+    const attendanceStatus = String(employee.attendance_status || "").toLowerCase();
     entry.count += 1;
-    if (!Number(employee.is_on_leave_today || 0)) {
+    if (
+      ["present", "grace", "late", "checkout_pending", "half_day"].includes(attendanceStatus) ||
+      Number(employee.total_leads || 0) > 0 ||
+      Number(employee.total_appointments || 0) > 0 ||
+      Number(employee.total_followups || 0) > 0 ||
+      Number(employee.project_assignments || 0) > 0
+    ) {
       entry.active += 1;
-    }
-    if (Number(employee.is_on_leave_today || 0)) {
-      entry.onLeave += 1;
     }
     if (isRecentJoiner(employee)) {
       entry.newJoiners += 1;
@@ -1346,8 +1341,8 @@ function hydrateEmployeesWithOperationalData(employees, attendanceRows, leaveRow
         attendanceRow.status ||
         attendanceRow.attendance_status ||
         "not_marked",
-      is_on_leave_today: Number(employee?.is_on_leave_today || (leaveRow ? 1 : 0)),
-      today_leave_type: employee?.today_leave_type || leaveRow?.leave_type || null,
+      is_on_leave_today: 0,
+      today_leave_type: null,
       documents_present: documentsPresent,
       documents_required: documentsRequired,
       documents_missing: Math.max(documentsRequired - requiredDocumentsPresent, 0),
@@ -1499,10 +1494,6 @@ function calculateEmployeeScore(employee) {
       break;
   }
 
-  if (Number(employee.is_on_leave_today || 0)) {
-    score -= 4;
-  }
-
   score += Math.round((docCompletion.percent / 100) * 18);
 
   if (String(employee.profile_setup_status || "").toLowerCase() === "completed") {
@@ -1565,16 +1556,13 @@ function buildPerformanceRows(sourceEmployees = hrState.filteredEmployees) {
       score,
       rating,
       recommendation,
-      note:
-        Number(employee.is_on_leave_today || 0)
-          ? "Leave impact on daily productivity."
-          : [
-              `${getAttendanceStatusLabel(employee.attendance_status)} attendance`,
-              `${getDocumentCompletion(employee).percent}% compliance`,
-              activityBits.join(" | "),
-            ]
-              .filter(Boolean)
-              .join(" | "),
+      note: [
+        `${getAttendanceStatusLabel(employee.attendance_status)} attendance`,
+        `${getDocumentCompletion(employee).percent}% compliance`,
+        activityBits.join(" | "),
+      ]
+        .filter(Boolean)
+        .join(" | "),
     };
   }).sort((left, right) => right.score - left.score);
 }
@@ -1584,9 +1572,6 @@ function buildTasksBoard(openings, performanceRows) {
   const week = [];
   const planned = [];
 
-  const pendingLeaves = hrState.leaves.data.filter(
-    (item) => String(item.status || "").toLowerCase() === "pending",
-  );
   const incompleteProfiles = hrState.employees.filter(
     (employee) => String(employee.profile_setup_status || "").toLowerCase() !== "completed",
   );
@@ -1612,17 +1597,8 @@ function buildTasksBoard(openings, performanceRows) {
       Number(employee.total_followups || 0) +
       Number(employee.project_assignments || 0);
 
-    return liveActivity === 0 && !Number(employee.is_on_leave_today || 0);
+    return liveActivity === 0;
   });
-
-  if (pendingLeaves.length) {
-    urgent.push({
-      title: `Approve ${pendingLeaves.length} pending leave request${pendingLeaves.length > 1 ? "s" : ""}`,
-      detail: "Review leave approvals so attendance and payroll stay aligned.",
-      tone: "bad",
-      tag: "Leave Queue",
-    });
-  }
 
   if (Number(payrollSummary.generatedEmployees || 0) < Number(payrollSummary.totalEmployees || 0)) {
     urgent.push({
@@ -1725,7 +1701,6 @@ function buildTasksBoard(openings, performanceRows) {
 
 function buildAnnouncements(openings, performanceRows) {
   const recentJoiners = getRecentJoiners(4);
-  const pendingLeaves = Number(hrState.leaves.summary?.pendingRequests || 0);
   const crmSummary = getCrmSummary();
   const projectSummary = getProjectTrackerSummary();
 
@@ -1739,15 +1714,6 @@ function buildAnnouncements(openings, performanceRows) {
       tag: "New Joiner",
     });
   });
-
-  if (pendingLeaves > 0) {
-    list.push({
-      title: "Leave approvals pending",
-      detail: `${pendingLeaves} leave request(s) need review to keep workforce planning accurate.`,
-      tone: "warn",
-      tag: "HR Update",
-    });
-  }
 
   const criticalOpenings = openings.filter((opening) => opening.openCount > 0);
   if (criticalOpenings.length) {
@@ -1794,7 +1760,11 @@ function renderDashboard() {
   const employees = hrState.employees;
   const attendanceSummary = hrState.attendance.summary || {};
   const recentJoiners = getRecentJoiners();
-  const onLeaveToday = getEmployeesOnLeaveToday();
+  const attendanceExceptions = employees.filter((employee) =>
+    ["late", "half_day", "absent", "checkout_pending"].includes(
+      String(employee.attendance_status || "").toLowerCase(),
+    ),
+  );
   const openings = buildOpenPositions();
   const pipeline = buildRecruitmentPipeline(openings);
   const pendingInterviews = pipeline.find(
@@ -1829,7 +1799,7 @@ function renderDashboard() {
     "metricNewJoiners",
     formatCompactNumber(employees.filter(isRecentJoiner).length),
   );
-  setText("metricEmployeesOnLeave", formatCompactNumber(onLeaveToday.length));
+  setText("metricCheckoutPending", formatCompactNumber(Number(attendanceSummary.checkoutPending || 0)));
   setText(
     "metricOpenPositions",
     formatCompactNumber(
@@ -1852,14 +1822,14 @@ function renderDashboard() {
   );
 
   renderStackList(
-    "employeesOnLeaveList",
-    onLeaveToday.map((employee) => ({
+    "attendanceExceptionsList",
+    attendanceExceptions.slice(0, 6).map((employee) => ({
       title: employee.name || "Employee",
-      detail: `${formatRole(employee.role)} | ${String(employee.today_leave_type || "Leave").replace(/_/g, " ")}`,
-      tag: "Approved Leave",
+      detail: `${formatRole(employee.role)} | ${getAttendanceStatusLabel(employee.attendance_status)}`,
+      tag: "Attendance",
       tone: "warn",
     })),
-    "No employees are on approved leave today.",
+    "No attendance exceptions found today.",
   );
 
   const performanceRows = buildPerformanceRows(hrState.employees);
@@ -1982,9 +1952,9 @@ function renderAttendanceSection() {
       note: "Attendance exceptions needing review",
     },
     {
-      label: "Pending Leaves",
-      value: Number(hrState.leaves.summary?.pendingRequests || 0),
-      note: "Leave approvals waiting for action",
+      label: "Checkout Pending",
+      value: Number(summary.checkoutPending || 0),
+      note: "Employees checked in without checkout",
     },
   ]);
 
@@ -2013,43 +1983,11 @@ function renderAttendanceSection() {
     "shiftManagementGrid",
     departmentStats.map((item) => ({
       title: item.name,
-      detail: `${item.count} employee(s) | ${item.active} active today | ${item.onLeave} on leave`,
+      detail: `${item.count} employee(s) | ${item.active} active today`,
       tag: item.newJoiners > 0 ? `${item.newJoiners} new` : "Stable",
       tone: item.newJoiners > 0 ? "info" : "good",
     })),
     "No shift management data available.",
-  );
-
-  renderTableBody(
-    "leaveQueueBody",
-    hrState.leaves.data.slice(0, 12).map(
-      (row) => `
-        <tr>
-          <td>
-            <strong>${escapeHtml(row.employee_name || "Employee")}</strong>
-            <small>${escapeHtml(formatDate(row.created_at))}</small>
-          </td>
-          <td>${escapeHtml(formatRole(row.role))}</td>
-          <td>${escapeHtml(String(row.leave_type || "").replace(/_/g, " "))}</td>
-          <td>${escapeHtml(formatDate(row.from_date))} - ${escapeHtml(formatDate(row.to_date))}</td>
-          <td>${statusPill(row.status || "pending", getStatusTone(row.status))}</td>
-          <td>${escapeHtml(String(Number(row.leave_balance || 0).toFixed(1)))}</td>
-        </tr>
-      `,
-    ),
-    6,
-    "No leave applications available.",
-  );
-
-  renderCardGrid(
-    "leaveBalanceGrid",
-    hrState.leaves.balances.slice(0, 8).map((row) => ({
-      title: row.userName || "Employee",
-      detail: `Available ${Number(row.availableBalance || 0).toFixed(1)} | Carry ${Number(row.carryForwardBalance || 0).toFixed(1)} | Credit ${Number(row.currentMonthCredit || 0).toFixed(1)}`,
-      tag: `${Number(row.paidLeaveDaysUsed || 0).toFixed(1)} used`,
-      tone: Number(row.availableBalance || 0) > 1 ? "good" : "warn",
-    })),
-    "Leave balance snapshots are not available yet.",
   );
 }
 
@@ -2087,7 +2025,7 @@ function renderPayrollSection() {
     {
       label: "Deductions & Taxes",
       value: formatCurrency(totalDeductions),
-      note: "Leave + penalty linked deductions",
+      note: "Attendance and penalty linked deductions",
     },
   ]);
 
@@ -2138,7 +2076,7 @@ function renderPayrollSection() {
     [
       {
         title: "Employees With Deductions",
-        detail: `${summary.employeesWithDeductions || 0} employee(s) impacted by leave or penalty deductions.`,
+        detail: `${summary.employeesWithDeductions || 0} employee(s) impacted by attendance or penalty deductions.`,
         tag: "Deduction View",
         tone: Number(summary.employeesWithDeductions || 0) > 0 ? "warn" : "good",
       },
@@ -2338,7 +2276,6 @@ function renderDocumentsSection() {
 function renderReportsSection() {
   const attendanceSummary = hrState.attendance.summary || {};
   const payrollSummary = hrState.payroll.summary || {};
-  const leaveSummary = hrState.leaves.summary || {};
   const employees = hrState.employees.length;
   const crmSummary = getCrmSummary();
   const projectSummary = getProjectTrackerSummary();
@@ -2368,9 +2305,9 @@ function renderReportsSection() {
       note: "Present/grace/late coverage",
     },
     {
-      label: "Leave Report",
-      value: Number(leaveSummary.pendingRequests || 0),
-      note: "Pending leave approvals",
+      label: "Exception Report",
+      value: Number(attendanceSummary.late || 0) + Number(attendanceSummary.halfDay || 0) + Number(attendanceSummary.absent || 0),
+      note: "Late, half-day, and absent cases",
     },
     {
       label: "CRM Activity",
@@ -2404,12 +2341,6 @@ function renderReportsSection() {
       detail: `${attendanceRate}% of the workforce is marked present/grace/late for today's working cycle.`,
       tag: "Attendance",
       tone: attendanceRate >= 75 ? "good" : "warn",
-    },
-    {
-      title: "Leave pressure",
-      detail: `${Number(leaveSummary.pendingRequests || 0)} leave request(s) are pending and ${Number(leaveSummary.employeesOnLeaveToday || 0)} employee(s) are on leave today.`,
-      tag: "Leave",
-      tone: Number(leaveSummary.pendingRequests || 0) > 0 ? "warn" : "good",
     },
     {
       title: "Compliance coverage",
@@ -2473,7 +2404,11 @@ function renderEmployeeStatusCards(employees) {
   const onboarding = employees.filter(
     (employee) => String(employee.profile_setup_status || "").toLowerCase() !== "completed",
   ).length;
-  const onLeave = employees.filter((employee) => Number(employee.is_on_leave_today || 0)).length;
+  const activeAttendance = employees.filter((employee) =>
+    ["present", "grace", "late", "checkout_pending", "half_day"].includes(
+      String(employee.attendance_status || "").toLowerCase(),
+    ),
+  ).length;
   const docsMissing = employees.filter(
     (employee) => getDocumentCompletion(employee).missing > 0,
   ).length;
@@ -2481,7 +2416,7 @@ function renderEmployeeStatusCards(employees) {
 
   renderMetricCardGrid("employeeStatusGrid", [
     { label: "Employee Directory", value: employees.length, note: "Visible in current filter" },
-    { label: "Status Tracking", value: onLeave, note: "Employees currently on leave" },
+    { label: "Attendance Active", value: activeAttendance, note: "Employees active in today's attendance" },
     { label: "Profile Completion", value: onboarding, note: "Profiles still pending completion" },
     { label: "Document Gaps", value: docsMissing, note: "Employees missing tracked documents" },
     { label: "Reporting Managers", value: teamLeads, note: "Team leads available in current team" },
@@ -2523,7 +2458,7 @@ function renderDepartmentManagement() {
     "departmentManagementGrid",
     getDepartmentStats().map((item) => ({
       title: item.name,
-      detail: `${item.count} employee(s) | ${item.active} active | ${item.onLeave} on leave`,
+      detail: `${item.count} employee(s) | ${item.active} active today`,
       tag: item.newJoiners > 0 ? `${item.newJoiners} new` : "Stable",
       tone: item.newJoiners > 0 ? "info" : "good",
     })),
