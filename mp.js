@@ -24,7 +24,11 @@ function normalizeCompanyKey(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-  if (normalized === "redsea" || normalized === "redseadigitals") {
+  if (
+    normalized === "redsea" ||
+    normalized === "redseadigitals" ||
+    normalized === "redseadigitalspvtltd"
+  ) {
     return "redsea";
   }
 
