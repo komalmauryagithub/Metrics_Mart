@@ -178,9 +178,6 @@ function showSection(sectionId, navItem = null) {
     window.PayrollUI.handleSectionShown("salary");
   }
 
-  if (sectionId === "leaveManagement" && window.LeaveManagementUI?.refresh) {
-    window.LeaveManagementUI.refresh();
-  }
 }
 
 function showPopup(title, message, isSuccess = true) {
