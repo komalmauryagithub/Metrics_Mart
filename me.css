@@ -2481,3 +2481,35 @@ body {
         width: 100%;
     }
 }
+
+/* Mobile attendance and table stability */
+.table-wrapper > .data-table {
+    min-width: max(720px, 100%);
+}
+
+.attendance-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-content: stretch;
+}
+
+.attendance-actions .btn,
+.attendance-actions .btn-save,
+.attendance-actions .btn-deal,
+.attendance-actions .attendance-calendar-btn {
+    justify-content: center;
+    min-width: 0;
+    white-space: nowrap;
+    width: 100%;
+}
+
+@media (max-width: 420px) {
+    .attendance-actions {
+        gap: 6px;
+    }
+
+    .attendance-actions .btn {
+        font-size: 12px;
+        padding: 9px 7px;
+    }
+}
