@@ -23,7 +23,11 @@
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "");
 
-    if (normalized === "redsea" || normalized === "redseadigitals") {
+    if (
+      normalized === "redsea" ||
+      normalized === "redseadigitals" ||
+      normalized === "redseadigitalspvtltd"
+    ) {
       return "redsea";
     }
 
@@ -38,12 +42,14 @@
     document.documentElement.classList.toggle("redsea-company", isRedSea);
 
     if (isRedSea) {
-      document.title = document.title.replace(/^Metrics/i, "RedSea");
+      document.title = document.title.replace(/^Metrics/i, "Red Sea Digitals");
       document.querySelectorAll(".brand-panel").forEach((element) => {
         const roleLabel = String(user.role || element.textContent || "")
           .toUpperCase()
           .trim();
-        element.textContent = roleLabel ? `REDSEA ${roleLabel}` : "REDSEA";
+        element.textContent = roleLabel
+          ? `RED SEA DIGITALS ${roleLabel}`
+          : "RED SEA DIGITALS";
       });
     }
   }
