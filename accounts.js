@@ -796,7 +796,7 @@ async function fetchAttendance() {
     });
     const result = await response.json();
     const rows = result.success ? result.data || [] : [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatDateKey(new Date());
     const todayRow = rows.find((row) => row.attendance_date === today);
     const canCheckIn = !todayRow;
     const canCheckOut = todayRow && !todayRow.check_out;
