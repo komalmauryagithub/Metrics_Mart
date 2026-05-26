@@ -704,3 +704,81 @@ body {
     min-width: max(640px, 100%) !important;
   }
 }
+
+@media (max-width: 640px) {
+  body:has(#adminTotalLeads) .header {
+    align-items: center !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+
+  body:has(#adminTotalLeads) .header-left {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  body:has(#adminTotalLeads) .brand-logo {
+    width: min(42vw, 170px) !important;
+    max-width: 170px !important;
+  }
+
+  body:has(#adminTotalLeads) .header-right,
+  body:has(#adminTotalLeads) .user-info {
+    align-items: center !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+  }
+
+  body:has(#adminTotalLeads) .header-right {
+    flex: 0 0 auto !important;
+    gap: 7px !important;
+    justify-content: flex-end !important;
+    width: auto !important;
+  }
+
+  body:has(#adminTotalLeads) .welcome {
+    display: none !important;
+  }
+
+  body:has(#adminTotalLeads) .logout-btn {
+    max-width: max-content !important;
+    min-width: 0 !important;
+    width: auto !important;
+    white-space: nowrap !important;
+  }
+
+  body:has(#adminTotalLeads) .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  body:has(#attendanceActions) .attendance-actions,
+  body:has(#attendanceContainer) .attendance-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  body:has(#attendanceActions) .attendance-actions button,
+  body:has(#attendanceContainer) .attendance-actions button {
+    font-size: 12px !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+    white-space: nowrap !important;
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 380px) {
+  body:has(#adminTotalLeads) .brand-logo {
+    width: min(38vw, 145px) !important;
+  }
+
+  body:has(#adminTotalLeads) .logout-btn {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
