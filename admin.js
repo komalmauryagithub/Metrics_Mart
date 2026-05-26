@@ -98,6 +98,17 @@ function normalizeAdminPanelCompanyKey(value) {
     return "";
 }
 
+function getAdminPanelCompanyScope() {
+    return (
+        normalizeAdminPanelCompanyKey(
+            currentUser?.company_key ||
+                currentUser?.selected_company ||
+                currentUser?.comp_name ||
+                new URLSearchParams(window.location.search).get("company"),
+        ) || "metrics"
+    );
+}
+
 function getAdminHeaderAvatarUrl(user = {}) {
     const companyKey = normalizeAdminPanelCompanyKey(
         user.company_key ||
@@ -1657,6 +1668,7 @@ async function loadAdminRenewals(forceRefresh = false) {
         const params = new URLSearchParams({
             days: "365",
         });
+        params.set("companyScope", getAdminPanelCompanyScope());
 
         if (currentUser?.id) {
             params.set("adminId", currentUser.id);
@@ -1689,7 +1701,10 @@ async function loadDownsaleNotifications() {
 
     try {
         table.innerHTML = `<tr><td colspan="9">Loading notifications...</td></tr>`;
-        const res = await fetch(`${BASE_URL}/api/downsale-requests`, {
+        const params = new URLSearchParams({
+            companyScope: getAdminPanelCompanyScope(),
+        });
+        const res = await fetch(`${BASE_URL}/api/downsale-requests?${params.toString()}`, {
             cache: "no-store",
         });
         const contentType = res.headers.get("content-type") || "";
