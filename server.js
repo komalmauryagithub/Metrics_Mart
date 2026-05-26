@@ -600,9 +600,13 @@ function getDealRenewalMatchCondition(dealAlias = "l", renewalAlias = "rl") {
   `;
 }
 
-function getDealRenewalSelectSql(dealAlias = "l") {
+function getDealRenewalSelectSql(dealAlias = "l", companyScope = "") {
   const matchCondition = getDealRenewalMatchCondition(dealAlias, "rl");
   const closedMatchCondition = getDealRenewalMatchCondition(dealAlias, "rcl");
+  const renewalScopeSql = getCompanyLeadScopeSql(companyScope, "rl");
+  const closedRenewalScopeSql = getCompanyLeadScopeSql(companyScope, "rcl");
+  const renewalScopeClause = renewalScopeSql ? `AND ${renewalScopeSql}` : "";
+  const closedRenewalScopeClause = closedRenewalScopeSql ? `AND ${closedRenewalScopeSql}` : "";
 
   return `
     CASE
@@ -610,6 +614,7 @@ function getDealRenewalSelectSql(dealAlias = "l") {
         SELECT 1
         FROM leads rl
         WHERE ${matchCondition}
+          ${renewalScopeClause}
         LIMIT 1
       ) THEN 1
       ELSE 0
@@ -618,11 +623,13 @@ function getDealRenewalSelectSql(dealAlias = "l") {
       SELECT COUNT(*)
       FROM leads rl
       WHERE ${matchCondition}
+        ${renewalScopeClause}
     ) AS renewal_count,
     (
       SELECT COUNT(*)
       FROM leads rcl
       WHERE ${closedMatchCondition}
+        ${closedRenewalScopeClause}
         AND rcl.lead_status = 'deal_closed'
     ) AS renewal_closed_count
   `;
@@ -10529,10 +10536,19 @@ app.put(
 app.get("/api/admin/renewals", async (req, res) => {
   try {
     await ensureLeadRenewalSourceColumn();
+    await ensureLeadCompanyScopeColumn();
 
     const lookaheadDays = normalizeRenewalLookaheadDays(req.query.days);
+    const companyScope = getRequestedCompanyScope(req);
     const renewalDueDateSql = "DATE_ADD(DATE(l.closed_date), INTERVAL 1 YEAR)";
     const closedRenewalMatchCondition = getDealRenewalMatchCondition("l", "rcl");
+    const closedRenewalScopeSql = getCompanyLeadScopeSql(companyScope, "rcl");
+    const whereParts = [
+      "l.lead_status = 'deal_closed'",
+      "l.closed_date IS NOT NULL",
+      `${renewalDueDateSql} <= DATE_ADD(CURDATE(), INTERVAL ${lookaheadDays} DAY)`,
+    ];
+    addRequestedLeadCompanyScope(req, whereParts, "l");
 
     const sql = `
       SELECT
@@ -10558,17 +10574,16 @@ app.get("/api/admin/renewals", async (req, res) => {
         DATE_FORMAT(${renewalDueDateSql}, '%Y-%m-%d') AS renewal_due_date,
         DATEDIFF(${renewalDueDateSql}, CURDATE()) AS days_left,
         COALESCE(NULLIF(l.assign_emp, ''), closer.name, creator.name, '') AS owner_name,
-        ${getDealRenewalSelectSql("l")}
+        ${getDealRenewalSelectSql("l", companyScope)}
       FROM leads l
       LEFT JOIN users closer ON closer.id = l.closed_by
       LEFT JOIN users creator ON creator.id = l.created_by
-      WHERE l.lead_status = 'deal_closed'
-        AND l.closed_date IS NOT NULL
-        AND ${renewalDueDateSql} <= DATE_ADD(CURDATE(), INTERVAL ${lookaheadDays} DAY)
+      WHERE ${whereParts.join("\n        AND ")}
         AND NOT EXISTS (
           SELECT 1
           FROM leads rcl
           WHERE ${closedRenewalMatchCondition}
+            ${closedRenewalScopeSql ? `AND ${closedRenewalScopeSql}` : ""}
             AND rcl.lead_status = 'deal_closed'
           LIMIT 1
         )
@@ -10634,12 +10649,13 @@ app.get("/api/deals/:id", async (req, res) => {
 
     const ownerScope = await getDealOwnerScope(req.params.id);
     const ownerFilter = buildDealOwnerFilter(ownerScope, "l");
+    const companyScope = getRequestedCompanyScope(req);
     const whereParts = ["l.lead_status = 'deal_closed'", ownerFilter.clause];
     addRequestedLeadCompanyScope(req, whereParts, "l");
     const sql = `
         SELECT
           l.*,
-          ${getDealRenewalSelectSql("l")}
+          ${getDealRenewalSelectSql("l", companyScope)}
         FROM leads l
         WHERE ${whereParts.join(" AND ")}
         ORDER BY l.closed_date DESC
@@ -10666,6 +10682,7 @@ app.get("/api/deals", async (req, res) => {
       .toLowerCase()
       .trim();
     const values = [];
+    const companyScope = getRequestedCompanyScope(req);
     const whereParts = ["l.lead_status = 'deal_closed'"];
     addRequestedLeadCompanyScope(req, whereParts, "l");
 
@@ -10679,7 +10696,7 @@ app.get("/api/deals", async (req, res) => {
     const sql = `
         SELECT
           l.*,
-          ${getDealRenewalSelectSql("l")}
+          ${getDealRenewalSelectSql("l", companyScope)}
         FROM leads l
         WHERE ${whereParts.join(" AND ")}
         ORDER BY l.closed_date DESC
@@ -10781,6 +10798,7 @@ app.post("/api/deal-products/quote", async (req, res) => {
 app.get("/api/downsale-requests", async (req, res) => {
   try {
     await ensureDownsaleRequestsTable();
+    await ensureLeadCompanyScopeColumn();
 
     const leadId = Number(req.query.leadId || 0);
     const status = String(req.query.status || "")
@@ -10798,6 +10816,7 @@ app.get("/api/downsale-requests", async (req, res) => {
       filters.push("dr.status = ?");
       params.push(status);
     }
+    addRequestedLeadCompanyScope(req, filters, "l");
 
     const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
     const sql = `
