@@ -782,3 +782,89 @@ body {
     padding-right: 8px !important;
   }
 }
+
+/* Fixed sidebar with scrollable work area across every CRM panel */
+html,
+body {
+  height: 100%;
+}
+
+body:has(.dashboard-container > .sidebar) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 100vh;
+  overflow: hidden !important;
+}
+
+body:has(.dashboard-container > .sidebar) > .header {
+  flex: 0 0 auto;
+  position: relative !important;
+  top: auto !important;
+}
+
+body:has(.dashboard-container > .sidebar) > .dashboard-container {
+  display: flex !important;
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  width: 100%;
+}
+
+body:has(.dashboard-container > .sidebar) .sidebar {
+  align-self: stretch;
+  flex: 0 0 240px;
+  height: auto !important;
+  max-height: none;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+body:has(.dashboard-container > .sidebar) .main-content {
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+body:has(.dashboard-container > .sidebar) .section.active,
+body:has(.dashboard-container > .sidebar) .hr-section.active {
+  min-height: 0;
+}
+
+@media (min-width: 901px) {
+  body:has(.dashboard-container > .sidebar) .sidebar {
+    position: sticky;
+    top: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  body:has(.dashboard-container > .sidebar) > .dashboard-container {
+    flex-direction: column !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) .sidebar {
+    align-self: stretch;
+    flex: 0 0 auto;
+    max-height: 74px;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) .sidebar ul {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    min-width: max-content;
+  }
+
+  body:has(.dashboard-container > .sidebar) .sidebar li {
+    flex: 0 0 auto;
+  }
+}
