@@ -34,6 +34,7 @@ const attendanceFaceImageInput = document.getElementById("attendance_face_image"
 const attendanceFaceSignatureInput = document.getElementById("attendance_face_signature");
 const attendanceFaceCaptureBtn = document.getElementById("captureAttendanceFaceBtn");
 const attendanceFaceStatus = document.getElementById("attendanceFaceEnrollmentStatus");
+const policyAcceptanceInput = document.getElementById("policy_acceptance");
 let attendanceFaceAlreadyEnrolled = false;
 
 if (window.location.protocol === "file:") {
@@ -401,6 +402,12 @@ async function handleProfileSubmit(event) {
   const formData = new FormData(profileForm);
   if (!String(formData.get("aadhar_no") || "").trim()) {
     setFormMessage("Aadhar number is required.", "error");
+    return;
+  }
+
+  if (!policyAcceptanceInput?.checked) {
+    setFormMessage("Please accept the HR Policy and Employment Terms & Conditions before submitting.", "error");
+    policyAcceptanceInput?.focus();
     return;
   }
 
