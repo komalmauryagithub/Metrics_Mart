@@ -868,3 +868,196 @@ body:has(.dashboard-container > .sidebar) .hr-section.active {
     flex: 0 0 auto;
   }
 }
+
+/* Final mobile layout guards for headers, proposal actions, and ME tables */
+#dealsContainer .table-wrapper,
+#proposalListContainer .table-wrapper,
+.admin-proposal-list-panel .table-wrapper {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+
+#dealsContainer .data-table,
+#proposalListContainer .data-table,
+.admin-proposal-list-panel .data-table {
+  width: max-content !important;
+  min-width: max(880px, 100%) !important;
+  max-width: none !important;
+  table-layout: auto !important;
+  white-space: nowrap;
+}
+
+.admin-proposal-table-actions,
+.proposal-table-actions,
+.admin-proposal-toolbar-actions,
+.proposal-toolbar-actions,
+.invoice-actions {
+  align-items: center !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-proposal-table-actions .btn,
+.proposal-table-actions .btn,
+.admin-proposal-toolbar-actions .btn,
+.proposal-toolbar-actions .btn,
+.invoice-actions .btn,
+.invoice-actions .invoice-btn {
+  align-items: center !important;
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  justify-content: center !important;
+  margin-top: 0 !important;
+  min-width: 34px !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 640px) {
+  body:has(.dashboard-container > .sidebar) > .header {
+    align-items: center !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .header-left {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .brand-logo {
+    height: auto !important;
+    max-width: 150px !important;
+    width: min(38vw, 150px) !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .header-right {
+    align-items: center !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    justify-content: flex-end !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .welcome {
+    display: none !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .user-info {
+    align-items: center !important;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 5px !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .avatar,
+  body:has(.dashboard-container > .sidebar) > .header .user-avatar,
+  body:has(.dashboard-container > .sidebar) > .header .profile-avatar {
+    flex: 0 0 32px !important;
+    height: 32px !important;
+    width: 32px !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .role,
+  body:has(.dashboard-container > .sidebar) > .header .role-badge {
+    flex: 0 0 auto !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    max-width: 96px !important;
+    overflow: hidden !important;
+    padding: 6px 8px !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    width: auto !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .logout-btn {
+    align-items: center !important;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    font-size: 11px !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    max-width: max-content !important;
+    min-width: 0 !important;
+    padding: 8px 9px !important;
+    white-space: nowrap !important;
+    width: auto !important;
+  }
+
+  body:has(#adminTotalLeads) .dashboard-metrics,
+  body:has(#adminTotalLeads) .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .admin-proposal-table-actions,
+  .proposal-table-actions,
+  .invoice-actions {
+    padding-bottom: 2px;
+  }
+
+  .admin-proposal-table-actions .btn,
+  .proposal-table-actions .btn,
+  .invoice-actions .btn,
+  .invoice-actions .invoice-btn {
+    height: 34px !important;
+    padding: 0 !important;
+    width: 34px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  body:has(.dashboard-container > .sidebar) > .header {
+    gap: 5px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .brand-logo {
+    max-width: 125px !important;
+    width: min(34vw, 125px) !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .avatar,
+  body:has(.dashboard-container > .sidebar) > .header .user-avatar,
+  body:has(.dashboard-container > .sidebar) > .header .profile-avatar {
+    flex-basis: 30px !important;
+    height: 30px !important;
+    width: 30px !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .role,
+  body:has(.dashboard-container > .sidebar) > .header .role-badge {
+    font-size: 10px !important;
+    max-width: 74px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  body:has(.dashboard-container > .sidebar) > .header .logout-btn {
+    font-size: 10px !important;
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+  }
+}
