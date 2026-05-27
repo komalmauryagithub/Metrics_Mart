@@ -6,6 +6,8 @@
       : window.location.origin || "https://metrics-mart-gf6l.onrender.com";
   const ADMIN_PROPOSAL_HEADER_URL = `${ADMIN_PROPOSAL_BASE_URL}/letterhead-header.jpeg`;
   const ADMIN_PROPOSAL_FOOTER_URL = `${ADMIN_PROPOSAL_BASE_URL}/letterhead-footer.jpeg`;
+  const ADMIN_PROPOSAL_REDSEA_HEADER_URL = `${ADMIN_PROPOSAL_BASE_URL}/redsea-letterhead-header.jpeg`;
+  const ADMIN_PROPOSAL_REDSEA_FOOTER_URL = `${ADMIN_PROPOSAL_BASE_URL}/redsea-letterhead-footer.jpeg`;
   const ADMIN_PROPOSAL_REQUEST_TIMEOUT_MS = 15000;
 
   let currentProposalId = null;
@@ -122,6 +124,15 @@
   }
 
   function getPayload() {
+    const admin = getCurrentAdmin();
+    const companyScope =
+      normalizeProposalCompanyKey(
+        admin.company_key ||
+          admin.selected_company ||
+          admin.company_scope ||
+          admin.comp_name,
+      ) || "metrics";
+
     return {
       client_name: document.getElementById("adminProposalClientName")?.value.trim() || "",
       client_email: document.getElementById("adminProposalClientEmail")?.value.trim() || "",
@@ -134,7 +145,10 @@
       technology:
         document.getElementById("adminProposalTechnology")?.value.trim() || "Core PHP + MySQL",
       notes: document.getElementById("adminProposalNotes")?.value.trim() || "",
-      created_by: getCurrentAdmin()?.id || null,
+      company_scope: companyScope,
+      company_key: companyScope,
+      comp_name: admin.comp_name || admin.selected_company || "",
+      created_by: admin.id || null,
     };
   }
 
@@ -167,8 +181,10 @@
       client_email: proposal.client_email || "",
       company_name: proposal.company_name || "",
       project_topic: proposal.project_topic || "",
+      company_scope: proposal.company_scope || "",
       status: proposal.status || "draft",
       created_by_name: proposal.created_by_name || "",
+      created_by_company: proposal.created_by_company || "",
     };
 
     proposalSummaryCache.set(id, summary);
@@ -347,7 +363,82 @@
     return String(value || "").replace(/\r\n/g, "\n").trim();
   }
 
+  function normalizeProposalCompanyKey(value = "") {
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+
+    if (
+      normalized === "redsea" ||
+      normalized === "redseadigitals" ||
+      normalized === "redseadigitalspvtltd"
+    ) {
+      return "redsea";
+    }
+
+    return "";
+  }
+
+  function isRedSeaProposal(proposal = {}) {
+    const admin = getCurrentAdmin();
+    const brandText = [
+      proposal.client_name,
+      proposal.company_name,
+      proposal.project_topic,
+      proposal.requirement_details,
+      proposal.notes,
+      proposal.proposal_content,
+      proposal.company_scope,
+      proposal.created_by_company,
+      proposal.created_by_comp_name,
+      admin.company_key,
+      admin.selected_company,
+      admin.company_scope,
+      admin.comp_name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ");
+
+    return (
+      normalizeProposalCompanyKey(
+        proposal.company_scope ||
+          proposal.created_by_company ||
+          admin.company_key ||
+          admin.selected_company ||
+          admin.comp_name,
+      ) === "redsea" ||
+      /\bred\s*sea\b/.test(brandText) ||
+      brandText.includes("redseadigitals")
+    );
+  }
+
+  function getProposalLetterheadUrls(proposal = {}) {
+    if (isRedSeaProposal(proposal)) {
+      return {
+        header: ADMIN_PROPOSAL_REDSEA_HEADER_URL,
+        footer: ADMIN_PROPOSAL_REDSEA_FOOTER_URL,
+        brandName: "RED SEA DIGITALS",
+        accentColor: "#ef4444",
+        headingColor: "#ff3045",
+        footerText: "info@redseadigitals.com | +91 9310355211",
+      };
+    }
+
+    return {
+      header: ADMIN_PROPOSAL_HEADER_URL,
+      footer: ADMIN_PROPOSAL_FOOTER_URL,
+      brandName: "METRICS MART",
+      accentColor: "#35b8ae",
+      headingColor: "#0f766e",
+      footerText: "info@metricsmart.in | www.metricsmartinfoline.com",
+    };
+  }
+
   function buildCanvasLines(ctx, proposal = {}, contentWidth) {
+    const letterhead = getProposalLetterheadUrls(proposal);
     const lines = [];
     const pushWrapped = (text, style = {}) => {
       setCanvasFont(ctx, style);
@@ -384,9 +475,9 @@
           return;
         }
 
-        const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
+        const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || /^PROJECT [A-Z0-9 &/.-]+$/.test(trimmed);
         pushWrapped(trimmed, {
-          color: isHeading ? "#0f766e" : "#111827",
+          color: isHeading ? letterhead.headingColor : "#111827",
           size: isHeading ? 24 : 22,
           weight: isHeading ? "700" : "400",
           gapAfter: isHeading ? 10 : 6,
@@ -411,28 +502,28 @@
     return Math.round(pageWidth * (image.naturalHeight / image.naturalWidth));
   }
 
-  function drawFallbackHeader(ctx, pageWidth, height, margin) {
+  function drawFallbackHeader(ctx, pageWidth, height, margin, letterhead = {}) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, pageWidth, height);
-    ctx.fillStyle = "#35b8ae";
+    ctx.fillStyle = letterhead.accentColor || "#35b8ae";
     ctx.fillRect(0, 0, pageWidth, 120);
     ctx.fillStyle = "#0f172a";
     ctx.font = "700 34px Arial, sans-serif";
-    ctx.fillText("METRICS MART", margin, 72);
+    ctx.fillText(letterhead.brandName || "METRICS MART", margin, 72);
     ctx.font = "400 18px Arial, sans-serif";
     ctx.fillStyle = "#475569";
     ctx.fillText("Project Proposal", margin, 103);
   }
 
-  function drawFallbackFooter(ctx, pageWidth, pageHeight, height, margin) {
+  function drawFallbackFooter(ctx, pageWidth, pageHeight, height, margin, letterhead = {}) {
     const footerTop = pageHeight - height;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, footerTop, pageWidth, height);
-    ctx.fillStyle = "#35b8ae";
+    ctx.fillStyle = letterhead.accentColor || "#35b8ae";
     ctx.fillRect(0, footerTop + height - 76, pageWidth, 76);
     ctx.fillStyle = "#0f172a";
     ctx.font = "400 20px Arial, sans-serif";
-    ctx.fillText("info@metricsmart.in | www.metricsmartinfoline.com", margin, footerTop + height - 38);
+    ctx.fillText(letterhead.footerText || "info@metricsmart.in | www.metricsmartinfoline.com", margin, footerTop + height - 38);
   }
 
   function getCanvasLineHeight(line) {
@@ -468,9 +559,10 @@
     const pageWidth = 1240;
     const pageHeight = 1754;
     const margin = 86;
+    const letterheadUrls = getProposalLetterheadUrls(proposal);
     const [headerImage, footerImage] = await Promise.all([
-      loadLetterheadImage(ADMIN_PROPOSAL_HEADER_URL),
-      loadLetterheadImage(ADMIN_PROPOSAL_FOOTER_URL),
+      loadLetterheadImage(letterheadUrls.header),
+      loadLetterheadImage(letterheadUrls.footer),
     ]);
     const headerHeight = getScaledImageHeight(headerImage, pageWidth, 325);
     const footerHeight = getScaledImageHeight(footerImage, pageWidth, 329);
@@ -501,7 +593,7 @@
       } else {
         ctx.save();
         ctx.translate(0, pageTop);
-        drawFallbackHeader(ctx, canvas.width, headerHeight, margin);
+        drawFallbackHeader(ctx, canvas.width, headerHeight, margin, letterheadUrls);
         ctx.restore();
       }
 
@@ -528,7 +620,7 @@
       } else {
         ctx.save();
         ctx.translate(0, pageTop);
-        drawFallbackFooter(ctx, canvas.width, pageHeight, footerHeight, margin);
+        drawFallbackFooter(ctx, canvas.width, pageHeight, footerHeight, margin, letterheadUrls);
         ctx.restore();
       }
     });
