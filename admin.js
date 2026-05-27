@@ -3866,10 +3866,18 @@ async function populateNextEmployeeCode(form = getUserFormElement()) {
     const employeeCodeField = form?.elements?.employee_code;
     if (!employeeCodeField) return;
 
+    const companyScope =
+        normalizeAdminPanelCompanyKey(form?.elements?.comp_name?.value) ||
+        getAdminPanelCompanyScope();
+    const query = new URLSearchParams({
+        company: companyScope,
+        company_scope: companyScope,
+    });
+
     employeeCodeField.value = "Generating...";
 
     try {
-        const response = await fetch(`${BASE_URL}/api/users/next-employee-code`, {
+        const response = await fetch(`${BASE_URL}/api/users/next-employee-code?${query.toString()}`, {
             cache: "no-store",
         });
         const result = await response.json().catch(() => ({}));
@@ -3965,6 +3973,16 @@ function setupUserRegistrationForm() {
         roleField.dataset.compensationBound = "true";
     }
 
+    const companyField = getUserFormElement()?.elements?.comp_name;
+    if (companyField && !companyField.dataset.employeeCodeBound) {
+        companyField.addEventListener("change", () => {
+            if (userFormMode === "create") {
+                populateNextEmployeeCode();
+            }
+        });
+        companyField.dataset.employeeCodeBound = "true";
+    }
+
     toggleUserPfFields();
     toggleUserCompensationFields();
 }
@@ -4055,6 +4073,12 @@ function resetUserFormState() {
     }
     if (form?.elements?.compensation_type) {
         form.elements.compensation_type.value = "salary";
+    }
+    if (form?.elements?.comp_name) {
+        form.elements.comp_name.value =
+            getAdminPanelCompanyScope() === "redsea"
+                ? "RedSea"
+                : "Metrics Mart Infoline Pvt Ltd";
     }
     if (form?.elements?.commission_percent) {
         form.elements.commission_percent.value = "";
