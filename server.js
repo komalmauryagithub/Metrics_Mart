@@ -2328,7 +2328,8 @@ async function sendProfileSetupInviteEmail(profileSetup, user) {
       status: error?.code === "RESEND_NOT_CONFIGURED" ? "not_configured" : "failed",
       provider: "resend",
       emailError: String(error?.name || error?.code || "RESEND_SEND_FAILED"),
-      message: "Second form link could not be sent.",
+      message:
+        "Profile form email is ready to send. Please use the email button or open the email draft to send it.",
       missingConfig: Array.isArray(error?.missingConfig) ? error.missingConfig : [],
     };
   }
