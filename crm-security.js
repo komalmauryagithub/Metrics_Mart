@@ -94,6 +94,75 @@
     window.fetch.__companyScopePatched = true;
   }
 
+  function scrollPanelToTop() {
+    const scrollTargets = [
+      document.querySelector(".main-content"),
+      document.querySelector(".section.active"),
+      document.querySelector(".hr-section.active"),
+    ].filter(Boolean);
+
+    scrollTargets.forEach((target) => {
+      if (typeof target.scrollTo === "function") {
+        target.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      } else {
+        target.scrollTop = 0;
+        target.scrollLeft = 0;
+      }
+    });
+
+    if (typeof window.scrollTo === "function") {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }
+  }
+
+  function queueSectionScrollReset() {
+    const nextFrame =
+      window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 0));
+
+    nextFrame(() => {
+      nextFrame(scrollPanelToTop);
+    });
+  }
+
+  function patchSectionNavigation() {
+    ["showSection", "openAdminSection"].forEach((name) => {
+      const original = window[name];
+
+      if (typeof original !== "function" || original.__crmScrollTopPatched) {
+        return;
+      }
+
+      const wrapped = function crmScrollTopWrappedSectionNav(...args) {
+        const result = original.apply(this, args);
+        queueSectionScrollReset();
+        return result;
+      };
+
+      wrapped.__crmScrollTopPatched = true;
+      wrapped.__original = original;
+      window[name] = wrapped;
+    });
+
+    if (document.__crmSectionScrollClickPatched) return;
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const sectionTrigger = target?.closest(
+          ".sidebar li, [data-dashboard-section], [data-dashboard-target], .dashboard-link-card",
+        );
+
+        if (sectionTrigger) {
+          queueSectionScrollReset();
+        }
+      },
+      true,
+    );
+
+    document.__crmSectionScrollClickPatched = true;
+  }
+
   function formatStampDate(date) {
     return date.toLocaleString("en-IN", {
       day: "2-digit",
@@ -272,6 +341,7 @@
 
   function initCrmSecurity() {
     patchCompanyScopedFetch();
+    patchSectionNavigation();
     applyCompanyTheme();
     ensureShield();
     buildWatermark();
