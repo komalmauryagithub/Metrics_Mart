@@ -1224,10 +1224,11 @@ async function handleProfileSetupInvite(profileSetup) {
     const requiredConfig = Array.isArray(emailDispatch.missingConfig)
         ? emailDispatch.missingConfig.filter((value) => String(value || "").trim())
         : [];
-    const baseEmailMessage = String(emailDispatch.message || "").trim();
     const emailMessage = emailSent
-        ? "Mail sent successfully."
-        : baseEmailMessage || "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
+        ? "Profile form email sent successfully."
+        : requiredConfig.length
+            ? "Profile form link is ready. Open the email draft to review and send it."
+            : "Profile form email is ready to send. Click Send Profile Link by Email to deliver it.";
     return {
         copied: false,
         emailSent,
@@ -1279,7 +1280,7 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
 
         showPopup(
             "Mail Sent Successfully",
-            "Mail sent successfully.",
+            "Profile form email sent successfully.",
             true,
         );
     } catch (error) {
@@ -1312,7 +1313,7 @@ async function resendProfileSetupEmail(userId, profileSetup, button = null) {
 
 function showProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
     const message = inviteResult.emailMessage ||
-        "The profile form link is ready. Email service is being configured on the server, so please share the link manually for now.";
+        "Profile form email is ready to send. Click Send Profile Link by Email to deliver it.";
     const canTryAutomaticEmail =
         !Array.isArray(inviteResult.requiredConfig) || inviteResult.requiredConfig.length === 0;
     const actions = [];
@@ -1355,9 +1356,9 @@ function showProfileSetupEmailPrompt(userId, profileSetup, inviteResult = {}) {
     );
 
     showPopup(
-        "Profile Form Link Ready",
+        "Profile Form Ready To Send",
         message,
-        false,
+        true,
         {
             autoClose: false,
             actions,
@@ -5158,7 +5159,7 @@ if (adminRegisterForm) {
                 const successMessage = isEditMode
                     ? "User updated successfully"
                     : inviteResult?.emailSent
-                        ? "User created successfully. Mail sent successfully."
+                        ? "User created successfully. Profile form email sent successfully."
                         : inviteResult?.copied
                             ? "User created successfully. Profile form link copied for manual sharing."
                             : "User created successfully. Profile form link is ready for manual sharing.";
