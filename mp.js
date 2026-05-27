@@ -103,7 +103,9 @@ function showPopup(title, message, isSuccess) {
 
   if (isSuccess) {
     icon.className = 'fas fa-check-circle';
-    icon.style.color = '#0f766e';
+    icon.style.color = document.body.classList.contains("redsea-login")
+      ? '#ef4444'
+      : '#0f766e';
   } else {
     icon.className = 'fas fa-exclamation-circle';
     icon.style.color = '#ef4444';
@@ -199,6 +201,7 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
     const data = await parseApiResponse(res);
 
     if (res.ok && data.success) {
+      applyLoginCompanyTheme(data.user?.company_key || company);
       localStorage.setItem("currentUser", JSON.stringify(data.user));
 
       const redirectPage = getRedirectPage(
@@ -301,6 +304,7 @@ if (loginCompanySelect) {
   loginCompanySelect.addEventListener("change", () => {
     applyLoginCompanyTheme(loginCompanySelect.value);
   });
+  applyLoginCompanyTheme(loginCompanySelect.value);
 }
 
 
