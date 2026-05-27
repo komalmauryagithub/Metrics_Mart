@@ -7921,9 +7921,11 @@ function getLoginCompanyCondition(companyKey) {
 function getRequestedCompanyScope(req) {
   return normalizeLoginCompanyKey(
     req?.query?.companyScope ||
+      req?.query?.company_scope ||
       req?.query?.company ||
       req?.query?.company_key ||
       req?.body?.companyScope ||
+      req?.body?.company_scope ||
       req?.body?.company ||
       req?.body?.company_key,
   );
@@ -7994,6 +7996,50 @@ function getCompanyLeadScopeSql(companyScope, leadAlias = "l") {
   const normalizedScope = normalizeLoginCompanyKey(companyScope);
   if (normalizedScope === "redsea") return getRedSeaLeadScopeSql(leadAlias);
   if (normalizedScope === "metrics") return getMetricsLeadScopeSql(leadAlias);
+  return "";
+}
+
+function getRedSeaProposalScopeSql(proposalAlias = "p") {
+  return `
+    (
+      LOWER(REPLACE(TRIM(COALESCE(${proposalAlias}.company_scope, '')), ' ', '')) IN
+        ('redsea', 'redseadigitals', 'redseadigitalspvtltd')
+      OR EXISTS (
+        SELECT 1
+        FROM users proposal_scope_user
+        WHERE proposal_scope_user.id = ${proposalAlias}.created_by
+          AND TRIM(COALESCE(${proposalAlias}.company_scope, '')) = ''
+          AND ${getRedSeaUserScopeSql("proposal_scope_user")}
+      )
+    )
+  `;
+}
+
+function getMetricsProposalScopeSql(proposalAlias = "p") {
+  return `
+    (
+      LOWER(REPLACE(TRIM(COALESCE(${proposalAlias}.company_scope, '')), ' ', '')) IN
+        ('metrics', 'metricsmart', 'metricsmartinfolinepvtltd')
+      OR (
+        TRIM(COALESCE(${proposalAlias}.company_scope, '')) = ''
+        AND (
+          ${proposalAlias}.created_by IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM users proposal_scope_user
+            WHERE proposal_scope_user.id = ${proposalAlias}.created_by
+              AND ${getMetricsUserScopeSql("proposal_scope_user")}
+          )
+        )
+      )
+    )
+  `;
+}
+
+function getCompanyProposalScopeSql(companyScope, proposalAlias = "p") {
+  const normalizedScope = normalizeLoginCompanyKey(companyScope);
+  if (normalizedScope === "redsea") return getRedSeaProposalScopeSql(proposalAlias);
+  if (normalizedScope === "metrics") return getMetricsProposalScopeSql(proposalAlias);
   return "";
 }
 
@@ -16719,6 +16765,33 @@ function formatMoney(amount) {
   });
 }
 
+function getInvoiceCompanyKey(invoiceData = {}) {
+  return (
+    normalizeLoginCompanyKey(
+      invoiceData.company_scope ||
+        invoiceData.created_by_company ||
+        invoiceData.created_by_comp_name ||
+        invoiceData.comp_name,
+    ) || "metrics"
+  );
+}
+
+async function getProformaInvoiceNumber(companyKey, leadId) {
+  const normalizedCompanyKey = normalizeLoginCompanyKey(companyKey) || "metrics";
+  const leadScopeSql = getCompanyLeadScopeSql(normalizedCompanyKey, "l");
+  const [rows] = await dbPromise.query(
+    `
+      SELECT COUNT(*) AS sequence_no
+      FROM leads l
+      WHERE l.id <= ?
+      ${leadScopeSql ? `AND ${leadScopeSql}` : ""}
+    `,
+    [Number(leadId) || 0],
+  );
+  const sequenceNo = Math.max(1, Number(rows[0]?.sequence_no || 0));
+  return `${normalizedCompanyKey === "redsea" ? "RSD" : "MM"}-PFI-${sequenceNo}`;
+}
+
 function getDealProductsForInvoice(leadId) {
   return ensureDealProductsTable().then(() => {
   const sql = `
@@ -16743,7 +16816,12 @@ function getDealProductsForInvoice(leadId) {
 app.get("/api/invoice/:id", (req, res) => {
   const leadId = req.params.id;
 
-  const sql = `SELECT * FROM leads WHERE id = ?`;
+  const sql = `
+    SELECT l.*, creator.comp_name AS created_by_company
+    FROM leads l
+    LEFT JOIN users creator ON creator.id = l.created_by
+    WHERE l.id = ?
+  `;
 
   db.query(sql, [leadId], async (err, result) => {
     if (err || result.length === 0) {
@@ -16777,44 +16855,86 @@ app.get("/api/invoice/:id", (req, res) => {
 
     const pageWidth = doc.page.width;
     const margin = doc.page.margins.left;
+    const companyKey = getInvoiceCompanyKey(data);
+    const isRedSeaInvoice = companyKey === "redsea";
+    const proformaInvoiceNumber = await getProformaInvoiceNumber(companyKey, leadId);
+    const invoiceAccentColor = isRedSeaInvoice ? "#ff3045" : "#0bb39c";
 
-    const logoPath = path.join(__dirname, "logo.png");
-    const qrPath = path.join(__dirname, "Qr.jpeg");
+    const logoPath = path.join(__dirname, isRedSeaInvoice ? "logored.png" : "logo.png");
+    const qrPath = path.join(__dirname, isRedSeaInvoice ? "qrred.jpeg" : "Qr.jpeg");
     const fontPath = path.join(__dirname, "fonts/NotoSans-Regular.ttf");
     doc.font(fontPath);
     const RS = "\u20B9";
 
     // ================= LOGO =================
     try {
-      doc.image(logoPath, margin, 20, {
+      doc.image(logoPath, margin, isRedSeaInvoice ? 10 : 20, {
         width: pageWidth - margin * 2,
       });
     } catch {}
 
-    let y = 150;
+    let y = isRedSeaInvoice ? 185 : 150;
 
     // ================= COMPANY =================
-    doc.fontSize(9).text("METRICSMART INFOLINE PRIVATE LIMITED", margin, y);
-    doc.text("GSTIN: 27AANCM9265F1ZY", margin, y + 12);
-    doc.text("Mumbai, Maharashtra - 400104", margin, y + 24);
+    doc.fontSize(9);
+    if (isRedSeaInvoice) {
+      doc.text("RED SEAS DIGITALS PRIVATE LIMITED", margin, y);
+      doc.text("GSTIN: 09AAOCR6149Q1ZA", margin, y + 12);
+      doc.text("Pincode: 201301", margin, y + 24);
+    } else {
+      doc.text("METRICSMART INFOLINE PRIVATE LIMITED", margin, y);
+      doc.text("GSTIN: 27AANCM9265F1ZY", margin, y + 12);
+      doc.text("Mumbai, Maharashtra - 400104", margin, y + 24);
+    }
 
     // ================= INVOICE =================
-    doc.text(`Invoice #: PFI-${leadId}`, 350, y);
+    doc.text(`Invoice #: ${proformaInvoiceNumber}`, 350, y);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 350, y + 12);
     doc.text(`Due Date: ${new Date().toLocaleDateString()}`, 350, y + 24);
 
     y += 60;
 
     // ================= CUSTOMER =================
-    doc.rect(margin, y, pageWidth - margin * 2, 60).stroke();
+    const customerBoxHeight = isRedSeaInvoice ? 76 : 60;
+    doc.rect(margin, y, pageWidth - margin * 2, customerBoxHeight).stroke();
 
-    doc.text("Customer Details:", margin + 5, y + 5);
-    doc.text(data.company_name || "", margin + 5, y + 20);
-    doc.text(data.client_name || "", 200, y + 20);
-    doc.text(`Ph: ${data.contact || ""}`, 350, y + 20);
-    doc.text(`${data.locality || ""}, ${data.city || ""}`, margin + 5, y + 35);
+    if (isRedSeaInvoice) {
+      const customerLabelX = margin + 12;
+      const customerValueX = margin + 108;
+      const customerRightLabelX = margin + 300;
+      const customerRightValueX = margin + 365;
+      const customerTop = y + 10;
+      const address = [data.locality, data.city].filter(Boolean).join(", ");
 
-    y += 80;
+      doc
+        .fontSize(9)
+        .fillColor(invoiceAccentColor)
+        .text("Customer Details", customerLabelX, customerTop);
+
+      doc
+        .fontSize(8)
+        .fillColor("#555")
+        .text("Company", customerLabelX, customerTop + 18, { width: 75 })
+        .text("Client", customerRightLabelX, customerTop + 18, { width: 55 })
+        .text("Phone", customerLabelX, customerTop + 36, { width: 75 })
+        .text("Address", customerRightLabelX, customerTop + 36, { width: 55 });
+
+      doc
+        .fillColor("#000")
+        .text(data.company_name || "-", customerValueX, customerTop + 18, { width: 180 })
+        .text(data.client_name || "-", customerRightValueX, customerTop + 18, { width: 145 })
+        .text(data.contact || "-", customerValueX, customerTop + 36, { width: 180 })
+        .text(address || "-", customerRightValueX, customerTop + 36, { width: 145 });
+    } else {
+      doc.text("Customer Details:", margin + 5, y + 5);
+      doc.text(data.company_name || "", margin + 5, y + 20);
+      doc.text(data.client_name || "", 200, y + 20);
+      doc.text(`Ph: ${data.contact || ""}`, 350, y + 20);
+      doc.text(`${data.locality || ""}, ${data.city || ""}`, margin + 5, y + 35);
+    }
+
+    doc.fillColor("#000");
+    y += customerBoxHeight + 20;
 
     // ================= TABLE =================
     const tableX = margin;
@@ -16826,7 +16946,7 @@ app.get("/api/invoice/:id", (req, res) => {
     const taxX = tableX + 395;
     const amountX = tableX + 465;
 
-    doc.rect(tableX, y, tableWidth, 20).fill("#0bb39c");
+    doc.rect(tableX, y, tableWidth, 20).fill(invoiceAccentColor);
 
     doc
       .fillColor("#fff")
@@ -16905,16 +17025,21 @@ app.get("/api/invoice/:id", (req, res) => {
     doc.rect(margin, y, tableWidth, 120).stroke();
 
     try {
-      doc.image(qrPath, margin + 10, y + 10, {
-        width: 90,
-      });
+      const qrSize = isRedSeaInvoice ? 72 : 90;
+      const qrBoxWidth = 120;
+      const qrX = isRedSeaInvoice
+        ? margin + (qrBoxWidth - qrSize) / 2
+        : margin + 10;
+      const qrY = y + (120 - qrSize) / 2;
+
+      doc.image(qrPath, qrX, qrY, { width: qrSize });
     } catch {}
 
     doc
       .fontSize(8)
-      .text("Bank: Kotak Mahindra Bank", margin + 120, y + 15)
-      .text("A/C: 5145057933", margin + 120, y + 35)
-      .text("IFSC: KKBK0001379", margin + 120, y + 55);
+      .text(isRedSeaInvoice ? "Bank: HDFC Bank" : "Bank: Kotak Mahindra Bank", margin + 120, y + (isRedSeaInvoice ? 25 : 15))
+      .text(isRedSeaInvoice ? "A/C: 50200109259621" : "A/C: 5145057933", margin + 120, y + 35)
+      .text(isRedSeaInvoice ? "IFSC: HDFC0000975" : "IFSC: KKBK0001379", margin + 120, y + 55);
 
     doc.text("Authorized Signatory", 400, y + 90);
 
@@ -17261,17 +17386,21 @@ app.post("/api/invoices/send-email", async (req, res) => {
   }
 });
 
-async function getProposalById(proposalId) {
+async function getProposalById(proposalId, companyScope = "") {
   await ensureProposalTables();
+  const proposalScopeSql = getCompanyProposalScopeSql(companyScope, "p");
+  const params = [proposalId];
+
   const [rows] = await dbPromise.query(
     `
       SELECT p.*, u.name AS created_by_name, u.comp_name AS created_by_company
       FROM proposals p
       LEFT JOIN users u ON u.id = p.created_by
       WHERE p.id = ?
+      ${proposalScopeSql ? `AND ${proposalScopeSql}` : ""}
       LIMIT 1
     `,
-    [proposalId],
+    params,
   );
 
   return rows[0] || null;
@@ -17488,13 +17617,23 @@ app.get("/api/proposals", async (req, res) => {
   try {
     await ensureProposalTables();
     const createdBy = Number(req.query?.created_by || 0);
+    const proposalScopeSql = getCompanyProposalScopeSql(
+      getRequestedCompanyScope(req),
+      "p",
+    );
     const params = [];
-    let whereSql = "";
+    const whereParts = [];
 
     if (createdBy) {
-      whereSql = "WHERE p.created_by = ?";
+      whereParts.push("p.created_by = ?");
       params.push(createdBy);
     }
+
+    if (proposalScopeSql) {
+      whereParts.push(proposalScopeSql);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
 
     const [rows] = await dbPromise.query(
       `
@@ -17520,7 +17659,7 @@ app.get("/api/proposals", async (req, res) => {
 
 app.get("/api/proposals/:id", async (req, res) => {
   try {
-    const proposal = await getProposalById(req.params.id);
+    const proposal = await getProposalById(req.params.id, getRequestedCompanyScope(req));
     if (!proposal) {
       return res.status(404).json({
         success: false,
@@ -17544,6 +17683,14 @@ app.put("/api/proposals/:id", async (req, res) => {
     const proposalContent = normalizeProposalText(req.body?.proposal_content);
     const status = String(req.body?.status || "draft").trim().toLowerCase();
     const body = req.body || {};
+    const proposalScopeSql = getCompanyProposalScopeSql(
+      body.company_scope ||
+        body.company_key ||
+        body.selected_company ||
+        body.comp_name ||
+        getRequestedCompanyScope(req),
+      "p",
+    );
     const optionalProposalField = (fieldName) =>
       Object.prototype.hasOwnProperty.call(body, fieldName)
         ? String(body[fieldName] || "").trim()
@@ -17572,6 +17719,7 @@ app.put("/api/proposals/:id", async (req, res) => {
             proposal_content = ?,
             status = ?
         WHERE id = ?
+        ${proposalScopeSql ? `AND ${proposalScopeSql}` : ""}
       `,
       [
         optionalProposalField("client_name"),
@@ -17617,7 +17765,7 @@ app.put("/api/proposals/:id", async (req, res) => {
 
 app.get("/api/proposals/:id/pdf", async (req, res) => {
   try {
-    const proposal = await getProposalById(req.params.id);
+    const proposal = await getProposalById(req.params.id, getRequestedCompanyScope(req));
     if (!proposal) {
       return res.status(404).json({
         success: false,
@@ -17645,7 +17793,7 @@ app.get("/api/proposals/:id/pdf", async (req, res) => {
 
 app.get("/api/proposals/:id/word", async (req, res) => {
   try {
-    const proposal = await getProposalById(req.params.id);
+    const proposal = await getProposalById(req.params.id, getRequestedCompanyScope(req));
     if (!proposal) {
       return res.status(404).json({
         success: false,
@@ -17713,7 +17861,7 @@ app.post("/api/proposals/:id/send-email", async (req, res) => {
   }
 
   try {
-    const proposal = await getProposalById(req.params.id);
+    const proposal = await getProposalById(req.params.id, getRequestedCompanyScope(req));
     if (!proposal) {
       return res.status(404).json({
         success: false,
@@ -17796,7 +17944,7 @@ app.post("/api/proposals/:id/send-whatsapp", async (req, res) => {
   }
 
   try {
-    const proposal = await getProposalById(req.params.id);
+    const proposal = await getProposalById(req.params.id, getRequestedCompanyScope(req));
     if (!proposal) {
       return res.status(404).json({
         success: false,
