@@ -321,6 +321,7 @@ function setupMeLeadForm() {
   const actionType = document.getElementById("meLeadActionType");
   const appDate = document.getElementById("meLeadAppDate");
   const appTime = document.getElementById("meLeadAppTime");
+  const companyScope = document.querySelector('#meLeadForm [name="company_scope"]');
 
   if (addClientBtn && !addClientBtn.dataset.bound) {
     addClientBtn.addEventListener("click", openMeLeadForm);
@@ -342,6 +343,11 @@ function setupMeLeadForm() {
     field.addEventListener("change", () => loadMeLeadEmployees());
     field.dataset.bound = "true";
   });
+
+  if (companyScope && !companyScope.dataset.bound) {
+    companyScope.addEventListener("change", () => loadMeLeadEmployees());
+    companyScope.dataset.bound = "true";
+  }
 
   toggleMeLeadActionSections();
 }
@@ -567,6 +573,25 @@ function getSelectedMeLeadEmployeeMeta(selectOrId) {
   };
 }
 
+function getMeLeadEmployeeRows(employees = []) {
+  if (employees.length) return employees;
+
+  if (
+    String(currentUser?.role || "").toLowerCase().trim() === "me" &&
+    currentUser?.name
+  ) {
+    return [
+      {
+        id: currentUser.id || "",
+        name: currentUser.name,
+        contact: currentUser.contact || "",
+      },
+    ];
+  }
+
+  return [];
+}
+
 function parseMeStoredArray(value) {
   if (Array.isArray(value)) return value;
   if (value == null || value === "") return [];
@@ -618,10 +643,23 @@ function selectMeLeadEmployee(name, id) {
 }
 
 async function fetchMeLeadEmployeeList(date, time) {
+  const companyScope =
+    document.querySelector('#meLeadForm [name="company_scope"]')?.value ||
+    getDefaultMeLeadCompanyScope();
+  const params = new URLSearchParams({
+    company_scope: companyScope,
+    company: companyScope,
+  });
+
+  if (date && time) {
+    params.set("date", date);
+    params.set("time", time);
+  }
+
   const endpoint =
     date && time
-      ? `${BASE_URL}/api/available-employees?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`
-      : `${BASE_URL}/api/me-employees`;
+      ? `${BASE_URL}/api/available-employees?${params.toString()}`
+      : `${BASE_URL}/api/me-employees?${params.toString()}`;
 
   const res = await fetch(endpoint, {
     cache: "no-store",
@@ -636,6 +674,8 @@ async function loadMeLeadEmployees() {
 
   if (!select) return;
 
+  const previousEmployee = getSelectedMeLeadEmployeeMeta(select);
+
   try {
     const result = await fetchMeLeadEmployeeList(date, time);
 
@@ -643,13 +683,22 @@ async function loadMeLeadEmployees() {
       throw new Error(result.message || "Failed to load employees");
     }
 
+    const employees = getMeLeadEmployeeRows(result.data || []);
     populateMeLeadEmployeeSelect(
       select,
-      result.data || [],
+      employees,
       date && time
         ? "No employee available at this time"
         : "No employees found",
     );
+
+    if (previousEmployee.name || previousEmployee.id) {
+      selectMeLeadEmployee(previousEmployee.name, previousEmployee.id);
+    }
+
+    if (!select.value) {
+      selectMeLeadEmployee(currentUser?.name, currentUser?.id);
+    }
   } catch (err) {
     console.error("ME lead employee load error:", err);
     populateMeLeadEmployeeSelect(select, [], "Unable to load employees");
@@ -828,6 +877,9 @@ async function handleMeLeadFormSubmit(event) {
     app_date: actionTypeValue === "appointment" ? formData.get("app_date") : null,
     app_time: actionTypeValue === "appointment" ? formData.get("app_time") : null,
     assign_emp: actionTypeValue === "appointment" ? selectedEmployee.name : null,
+    assign_emp_id: actionTypeValue === "appointment" ? selectedEmployee.id : null,
+    assign_emp_contact:
+      actionTypeValue === "appointment" ? selectedEmployee.contact : null,
     location: actionTypeValue === "appointment" ? locationValue : null,
     follow_date:
       actionTypeValue === "followup" ? formData.get("follow_date") : null,
