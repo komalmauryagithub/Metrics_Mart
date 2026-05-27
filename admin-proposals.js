@@ -123,15 +123,29 @@
     if (status) status.textContent = text;
   }
 
-  function getPayload() {
+  function getCurrentCompanyScope() {
     const admin = getCurrentAdmin();
-    const companyScope =
+    return (
       normalizeProposalCompanyKey(
         admin.company_key ||
           admin.selected_company ||
           admin.company_scope ||
           admin.comp_name,
-      ) || "metrics";
+      ) || "metrics"
+    );
+  }
+
+  function withCompanyScope(url) {
+    const companyScope = getCurrentCompanyScope();
+    if (!companyScope) return url;
+
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}company=${encodeURIComponent(companyScope)}&company_scope=${encodeURIComponent(companyScope)}`;
+  }
+
+  function getPayload() {
+    const admin = getCurrentAdmin();
+    const companyScope = getCurrentCompanyScope();
 
     return {
       client_name: document.getElementById("adminProposalClientName")?.value.trim() || "",
@@ -284,7 +298,7 @@
     }
 
     const res = await fetchProposalRequest(
-      `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${id}`,
+      withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${id}`),
       { cache: "no-store" },
       "Open proposal API",
     );
@@ -639,7 +653,7 @@
 
   async function fetchPdfBlob(proposalId) {
     const res = await fetchProposalRequest(
-      `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/pdf?t=${Date.now()}`,
+      withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/pdf?t=${Date.now()}`),
       { cache: "no-store" },
       "Proposal PDF API",
     );
@@ -657,7 +671,7 @@
   }
 
   function getPdfShareUrl(proposalId) {
-    return `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/pdf`;
+    return withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/pdf`);
   }
 
   function getEmailDetails(proposal = {}) {
@@ -696,7 +710,7 @@
     }
 
     const res = await fetchProposalRequest(
-      `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${currentProposalId}`,
+      withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${currentProposalId}`),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -800,7 +814,7 @@
 
     try {
       const res = await fetchProposalRequest(
-        `${ADMIN_PROPOSAL_BASE_URL}/api/proposals`,
+        withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals`),
         { cache: "no-store" },
         "Load proposals API",
       );
@@ -876,7 +890,7 @@
   async function open(proposalId) {
     try {
       const res = await fetchProposalRequest(
-        `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}`,
+        withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}`),
         { cache: "no-store" },
         "Open proposal API",
       );
@@ -929,7 +943,7 @@
       return;
     }
 
-    const downloadUrl = `${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/${normalizedType}?t=${Date.now()}`;
+  const downloadUrl = withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}/${normalizedType}?t=${Date.now()}`);
     const popup = openActionWindow(downloadUrl);
 
     try {
