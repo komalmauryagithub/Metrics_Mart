@@ -48,32 +48,6 @@ function applyLoginCompanyTheme(companyKey) {
   document.body.classList.toggle("redsea-login", isRedSea);
 }
 
-function openForgotPasswordModal() {
-  const modal = document.getElementById('forgotPasswordModal');
-  if (!modal) return;
-
-  modal.classList.remove('hidden');
-}
-
-function closeForgotPasswordModal() {
-  const modal = document.getElementById('forgotPasswordModal');
-  const form = document.getElementById('forgotPasswordForm');
-
-  if (modal) {
-    modal.classList.add('hidden');
-  }
-
-  if (form) {
-    form.reset();
-  }
-}
-
-function handleForgotPasswordBackdrop(event) {
-  if (event.target?.id === 'forgotPasswordModal') {
-    closeForgotPasswordModal();
-  }
-}
-
 async function parseApiResponse(response) {
   const text = await response.text();
   if (!text) return {};
@@ -230,74 +204,6 @@ document.getElementById("loginFormElement").addEventListener("submit", async fun
     btn.disabled = false;
   }
 });
-
-const forgotPasswordForm = document.getElementById("forgotPasswordForm");
-const LOCAL_PASSWORD_RESET_OTP_HINT_KEY = "mm_local_password_reset_otp_hint";
-
-if (forgotPasswordForm) {
-  forgotPasswordForm.addEventListener("submit", async function (e) {
-    e.preventDefault();
-
-    const formData = new FormData(this);
-    const payload = {
-      email: String(formData.get("email") || "").trim(),
-    };
-    const btn = document.getElementById("forgotPasswordBtn");
-    const originalText = btn?.innerHTML || "";
-
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = 'Sending Link...';
-    }
-
-    try {
-      const res = await fetch(`${BASE_URL}/api/auth/forgot-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-      const result = await parseApiResponse(res);
-
-      if (!res.ok || !result.success) {
-        const smtpCode = String(result.smtpError || "").trim();
-        throw new Error(
-          smtpCode
-            ? `${result.message || "Unable to reset password"} (${smtpCode})`
-            : result.message || "Unable to reset password",
-        );
-      }
-
-      closeForgotPasswordModal();
-      showPopup(
-        "Success",
-        result.message || "If your email is registered, a password reset OTP has been sent.",
-        true,
-      );
-
-      if (result.debugOtp) {
-        sessionStorage.setItem(LOCAL_PASSWORD_RESET_OTP_HINT_KEY, result.debugOtp);
-      } else {
-        sessionStorage.removeItem(LOCAL_PASSWORD_RESET_OTP_HINT_KEY);
-      }
-
-      if (result.requiresOtp || result.deliveryMode === "local_otp") {
-        window.setTimeout(() => {
-          window.location.href =
-            result.redirectUrl || `${BASE_URL}/reset-password.html?mode=otp`;
-        }, 1000);
-      }
-    } catch (error) {
-      showPopup("Error", error.message || "Unable to send reset email", false);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-      }
-    }
-  });
-}
 
 const loginCompanySelect = document.getElementById("loginCompanySelect");
 if (loginCompanySelect) {
