@@ -4285,20 +4285,30 @@ function parseEmployeeCodeSequence(employeeCode) {
   return match ? Number(match[1]) || 0 : 0;
 }
 
-async function getNextEmployeeCode() {
+async function getNextEmployeeCode(companyScope = "") {
   await ensureUserRegistrationColumns();
+  const userScopeSql = getCompanyUserScopeSql(companyScope, "u");
 
   const [rows] = await dbPromise.query(
     `
-      SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, ?) AS UNSIGNED)), 0) AS last_sequence
-      FROM users
-      WHERE employee_code REGEXP ?
+      SELECT CAST(SUBSTRING(u.employee_code, ?) AS UNSIGNED) AS sequence_no
+      FROM users u
+      WHERE u.employee_code REGEXP ?
+      ${userScopeSql ? `AND ${userScopeSql}` : ""}
+      ORDER BY sequence_no ASC
     `,
     [EMPLOYEE_CODE_PREFIX.length + 1, `^${EMPLOYEE_CODE_PREFIX}[0-9]+$`],
   );
 
-  const lastSequence = Number(rows[0]?.last_sequence || 0);
-  return formatEmployeeCode(lastSequence + 1);
+  let nextSequence = 1;
+  rows.forEach((row) => {
+    const sequenceNo = Number(row?.sequence_no || 0);
+    if (sequenceNo === nextSequence) {
+      nextSequence += 1;
+    }
+  });
+
+  return formatEmployeeCode(nextSequence);
 }
 
 async function ensureUserProfileSetupColumns() {
@@ -6927,12 +6937,14 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/users/next-employee-code", async (req, res) => {
   try {
-    const employeeCode = await getNextEmployeeCode();
+    const companyScope = getRequestedCompanyScope(req);
+    const employeeCode = await getNextEmployeeCode(companyScope);
     res.json({
       success: true,
       employeeCode,
       data: {
         employee_code: employeeCode,
+        company_scope: companyScope || "metrics",
       },
     });
   } catch (err) {
@@ -7118,7 +7130,7 @@ app.post("/register", (req, res) => {
       const attendanceFace = readAttendanceFaceSubmission(req.body, {
         required: false,
       });
-      employeeCode = await getNextEmployeeCode();
+      employeeCode = await getNextEmployeeCode(compName);
       const [insertResult] = await dbPromise.query(sql, [
         employeeCode,
         name,
