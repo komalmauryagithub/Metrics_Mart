@@ -1943,14 +1943,27 @@ function setProposalStatusText(text) {
   if (status) status.textContent = text;
 }
 
-function getProposalPayload() {
-  const companyScope =
+function getCurrentProposalCompanyScope() {
+  return (
     normalizeProposalCompanyKey(
       currentUser?.company_key ||
         currentUser?.selected_company ||
         currentUser?.company_scope ||
         currentUser?.comp_name,
-    ) || "metrics";
+    ) || "metrics"
+  );
+}
+
+function withProposalCompanyScope(url) {
+  const companyScope = getCurrentProposalCompanyScope();
+  if (!companyScope) return url;
+
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}company=${encodeURIComponent(companyScope)}&company_scope=${encodeURIComponent(companyScope)}`;
+}
+
+function getProposalPayload() {
+  const companyScope = getCurrentProposalCompanyScope();
 
   return {
     client_name: document.getElementById("proposalClientName")?.value.trim() || "",
@@ -2100,7 +2113,7 @@ async function getProposalSnapshot(proposalId = currentProposalId, { saveCurrent
   }
 
   const res = await fetchProposalRequest(
-    `${BASE_URL}/api/proposals/${id}`,
+    withProposalCompanyScope(`${BASE_URL}/api/proposals/${id}`),
     { cache: "no-store" },
     "Open proposal API",
   );
@@ -2454,7 +2467,7 @@ async function createProposalPngBlob(proposal = {}) {
 
 async function fetchProposalPdfBlob(proposalId) {
   const res = await fetchProposalRequest(
-    `${BASE_URL}/api/proposals/${proposalId}/pdf?t=${Date.now()}`,
+    withProposalCompanyScope(`${BASE_URL}/api/proposals/${proposalId}/pdf?t=${Date.now()}`),
     { cache: "no-store" },
     "Proposal PDF API",
   );
@@ -2472,7 +2485,7 @@ async function fetchProposalPdfBlob(proposalId) {
 }
 
 function getProposalPdfShareUrl(proposalId) {
-  return `${BASE_URL}/api/proposals/${proposalId}/pdf`;
+  return withProposalCompanyScope(`${BASE_URL}/api/proposals/${proposalId}/pdf`);
 }
 
 function getProposalEmailDetails(proposal = {}) {
@@ -2511,7 +2524,7 @@ async function persistCurrentProposal(status = "draft", { silent = false } = {})
   }
 
   const res = await fetchProposalRequest(
-    `${BASE_URL}/api/proposals/${currentProposalId}`,
+    withProposalCompanyScope(`${BASE_URL}/api/proposals/${currentProposalId}`),
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -2623,7 +2636,7 @@ async function loadMyProposals() {
 
   try {
     const res = await fetchProposalRequest(
-      `${BASE_URL}/api/proposals?created_by=${encodeURIComponent(currentUser.id)}`,
+      withProposalCompanyScope(`${BASE_URL}/api/proposals?created_by=${encodeURIComponent(currentUser.id)}`),
       { cache: "no-store" },
       "Load proposals API",
     );
@@ -2694,7 +2707,7 @@ async function loadMyProposals() {
 async function openProposal(proposalId) {
   try {
     const res = await fetchProposalRequest(
-      `${BASE_URL}/api/proposals/${proposalId}`,
+      withProposalCompanyScope(`${BASE_URL}/api/proposals/${proposalId}`),
       {
         cache: "no-store",
       },
@@ -2751,7 +2764,7 @@ async function downloadProposal(type, proposalId = currentProposalId) {
     return;
   }
 
-  const downloadUrl = `${BASE_URL}/api/proposals/${proposalId}/${normalizedType}?t=${Date.now()}`;
+  const downloadUrl = withProposalCompanyScope(`${BASE_URL}/api/proposals/${proposalId}/${normalizedType}?t=${Date.now()}`);
   const popup = openProposalActionWindow(downloadUrl);
 
   try {
