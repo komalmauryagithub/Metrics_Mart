@@ -16897,8 +16897,11 @@ app.get("/api/invoice/:id", (req, res) => {
 
     // ================= LOGO =================
     try {
+      const logoWidth = isRedSeaInvoice
+        ? pageWidth - margin * 2 - 18
+        : pageWidth - margin * 2;
       doc.image(logoPath, margin, isRedSeaInvoice ? 10 : 20, {
-        width: pageWidth - margin * 2,
+        width: logoWidth,
       });
     } catch {}
 
@@ -17059,7 +17062,7 @@ app.get("/api/invoice/:id", (req, res) => {
       const qrX = isRedSeaInvoice
         ? margin + (qrBoxWidth - qrSize) / 2
         : margin + 10;
-      const qrY = y + (120 - qrSize) / 2;
+      const qrY = isRedSeaInvoice ? y + 8 : y + (120 - qrSize) / 2;
 
       doc.image(qrPath, qrX, qrY, { width: qrSize });
     } catch {}
