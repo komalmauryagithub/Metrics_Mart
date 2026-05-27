@@ -204,36 +204,10 @@
 
     </form>
 
-    <div class="auth-link-row">
-      <button type="button" class="text-link-btn" onclick="openForgotPasswordModal()">Forgot Password?</button>
-    </div>
   </div>
 </div>
 
       </div>
-    </div>
-  </div>
-
-  <div id="forgotPasswordModal" class="auth-modal hidden" onclick="handleForgotPasswordBackdrop(event)">
-    <div class="auth-modal-card" role="dialog" aria-modal="true" aria-labelledby="forgotPasswordTitle">
-      <button type="button" class="auth-modal-close" onclick="closeForgotPasswordModal()" aria-label="Close forgot password form">
-        <i class="fas fa-xmark"></i>
-      </button>
-      <div class="auth-modal-header">
-        <h3 id="forgotPasswordTitle">Forgot Password</h3>
-        <p>Enter your registered email address. We will send you a secure password reset link.</p>
-      </div>
-      <form id="forgotPasswordForm" class="auth-modal-form">
-        <div class="input-group">
-          <label>Registered Email Address</label>
-          <input type="email" name="email" placeholder="your@email.com" required autocomplete="email">
-        </div>
-        <p class="auth-modal-note">The reset link will open a secure page where you can set a new password.</p>
-        <button type="submit" class="submit-btn" id="forgotPasswordBtn">
-          Send Reset Link
-          <i class="fas fa-paper-plane"></i>
-        </button>
-      </form>
     </div>
   </div>
 
@@ -247,7 +221,7 @@
     </div>
   </div>
 
-  <script src="mp.js"></script>
+  <script src="mp.js?v=20260527-no-forgot"></script>
 </body>
 </html>
 
