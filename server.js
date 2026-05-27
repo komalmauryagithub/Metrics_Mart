@@ -4448,6 +4448,10 @@ function normalizeLeadSalesType(value) {
   return normalized === "renewal" ? "renewal" : "new";
 }
 
+function normalizeRequiredLeadText(value) {
+  return String(value ?? "").trim();
+}
+
 function getAppointmentStageSql() {
   return `
     CASE
@@ -9016,9 +9020,13 @@ app.post("/api/leads", async (req, res) => {
   const appointmentStatus = hasAppointmentDate
     ? normalizeAppointmentStatus(data.appointment_status, "generated")
     : null;
-  const companyScope =
-    String(data.company_scope || data.companyScope || "").trim() ||
-    (await getCompanyScopeForUser(data.created_by));
+  const requestedCompanyScope = normalizeLoginCompanyKey(
+    data.company_scope || data.companyScope,
+  );
+  const creatorCompanyScope = requestedCompanyScope
+    ? ""
+    : normalizeLoginCompanyKey(await getCompanyScopeForUser(data.created_by));
+  const companyScope = requestedCompanyScope || creatorCompanyScope || "metrics";
 
   const sql = `
       INSERT INTO leads (
@@ -9038,24 +9046,24 @@ app.post("/api/leads", async (req, res) => {
     `;
 
   const values = [
-    data.company || null,
-    data.client || null,
-    data.contact || null,
+    normalizeRequiredLeadText(data.company),
+    normalizeRequiredLeadText(data.client),
+    normalizeRequiredLeadText(data.contact),
     data.alt_contact || null,
     data.telephone || null,
     data.email || null,
     data.gst_no || null,
     data.flat_no || null,
     data.building_name || null,
-    data.locality || null,
-    data.city || null,
-    data.pincode || null,
-    data.state || null,
+    normalizeRequiredLeadText(data.locality),
+    normalizeRequiredLeadText(data.city),
+    normalizeRequiredLeadText(data.pincode),
+    normalizeRequiredLeadText(data.state),
     data.maps_lnk || null,
-    data.source_lead || null,
+    normalizeRequiredLeadText(data.source_lead),
     salesType,
     renewalSourceLeadId || null,
-    data.industry_type || null,
+    normalizeRequiredLeadText(data.industry_type),
     JSON.stringify(data.web_type || []),
     JSON.stringify(data.seo_type || []),
     JSON.stringify(data.smo_type || []),
@@ -10477,7 +10485,14 @@ app.put("/api/users/:id/monthly-target", async (req, res) => {
 });
 // ====================== GET ME EMPLOYEES ======================
 app.get("/api/me-employees", (req, res) => {
-  const sql = `SELECT id, name, contact FROM users WHERE role = 'me' ORDER BY name`;
+  const whereParts = ["LOWER(TRIM(role)) = 'me'"];
+  addRequestedUserCompanyScope(req, whereParts, "users");
+  const sql = `
+    SELECT id, name, contact
+    FROM users
+    WHERE ${whereParts.join(" AND ")}
+    ORDER BY name
+  `;
 
   db.query(sql, (err, result) => {
     if (err) {
@@ -10491,6 +10506,7 @@ app.get("/api/me-employees", (req, res) => {
 // ====================== GET AVAILABLE EMPLOYEES ======================
 app.get("/api/available-employees", (req, res) => {
   const { date, time } = req.query;
+  const userScopeSql = getCompanyUserScopeSql(getRequestedCompanyScope(req), "u");
 
   if (!date || !time) {
     return res.status(400).json({
@@ -10502,7 +10518,8 @@ app.get("/api/available-employees", (req, res) => {
   const sql = `
       SELECT u.id, u.name, u.contact
       FROM users u
-      WHERE u.role = 'me'
+      WHERE LOWER(TRIM(u.role)) = 'me'
+      ${userScopeSql ? `AND ${userScopeSql}` : ""}
       AND u.name NOT IN (
         SELECT assign_emp
         FROM leads
