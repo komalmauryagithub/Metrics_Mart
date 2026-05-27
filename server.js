@@ -265,6 +265,16 @@ const PROPOSAL_LETTERHEAD_FOOTER_PATH = resolveExistingFilePath([
   path.join(__dirname, "letterhead-footer.jpeg"),
   path.join(__dirname, "assets", "proposal", "letterhead-footer.jpeg"),
 ]);
+const RED_SEA_PROPOSAL_LETTERHEAD_HEADER_PATH = resolveExistingFilePath([
+  process.env.RED_SEA_PROPOSAL_LETTERHEAD_HEADER,
+  path.join(__dirname, "redsea-letterhead-header.jpeg"),
+  path.join(__dirname, "assets", "proposal", "redsea-letterhead-header.jpeg"),
+]);
+const RED_SEA_PROPOSAL_LETTERHEAD_FOOTER_PATH = resolveExistingFilePath([
+  process.env.RED_SEA_PROPOSAL_LETTERHEAD_FOOTER,
+  path.join(__dirname, "redsea-letterhead-footer.jpeg"),
+  path.join(__dirname, "assets", "proposal", "redsea-letterhead-footer.jpeg"),
+]);
 const EMPLOYEE_CODE_PREFIX = "EMP";
 const EMPLOYEE_CODE_PAD_LENGTH = 4;
 
@@ -1863,7 +1873,13 @@ function getPublicEmailBaseUrl() {
 
 function getResendEmailConfig() {
   const apiKey = getFirstEmailEnvValue(["RESEND_API_KEY"]);
-  const from = getFirstEmailEnvValue(["EMAIL_FROM"]);
+  const from = getFirstEmailEnvValue([
+    "EMAIL_FROM",
+    "RESEND_EMAIL_FROM",
+    "MAIL_FROM",
+    "MAILER_FROM",
+    "FROM_EMAIL",
+  ]);
   const publicAppUrl = getPublicEmailBaseUrl();
   const missingConfig = [
     !apiKey ? "RESEND_API_KEY" : "",
@@ -1997,21 +2013,84 @@ function applyProposalPlaceholders(content, data = {}) {
   return normalizeProposalText(output);
 }
 
-function renderProposalHtml(content) {
+function isProposalContentHeading(text = "") {
+  const trimmed = String(text || "").trim();
+  return /^[A-Z0-9 &/.-]+:$/.test(trimmed) || /^PROJECT [A-Z0-9 &/.-]+$/.test(trimmed);
+}
+
+function isRedSeaProposal(proposal = {}) {
+  const brandText = [
+    proposal.client_name,
+    proposal.company_name,
+    proposal.project_topic,
+    proposal.requirement_details,
+    proposal.notes,
+    proposal.proposal_content,
+    proposal.company_scope,
+    proposal.created_by_company,
+    proposal.created_by_comp_name,
+    proposal.created_by_name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ");
+
+  return (
+    normalizeLoginCompanyKey(proposal.company_scope || proposal.created_by_company) === "redsea" ||
+    /\bred\s*sea\b/.test(brandText) ||
+    brandText.includes("redseadigitals")
+  );
+}
+
+function getProposalLetterheadConfig(proposal = {}) {
+  if (isRedSeaProposal(proposal)) {
+    return {
+      brandName: "Red Sea Digitals",
+      headerPath: RED_SEA_PROPOSAL_LETTERHEAD_HEADER_PATH,
+      footerPath: RED_SEA_PROPOSAL_LETTERHEAD_FOOTER_PATH,
+      headerHeight: 105,
+      footerHeight: 151,
+      fallbackColor: "#b91c1c",
+      headingColor: "#ff3045",
+      footerFallbackLabel: "info@redseadigitals.com | +91 9310355211",
+    };
+  }
+
+  return {
+    brandName: "Metrics Mart",
+    headerPath: PROPOSAL_LETTERHEAD_HEADER_PATH,
+    footerPath: PROPOSAL_LETTERHEAD_FOOTER_PATH,
+    headerHeight: 156,
+    footerHeight: 156,
+    fallbackColor: "#0f766e",
+    headingColor: "#0f766e",
+    footerFallbackLabel: "info@metricsmart.in | www.metricsmartinfoline.com",
+  };
+}
+
+function renderProposalHtml(content, proposal = {}) {
+  const letterhead = getProposalLetterheadConfig(proposal);
+
   return normalizeProposalText(content)
     .split(/\n{2,}/)
     .map((paragraph) => {
+      const trimmedParagraph = paragraph.trim();
       const safeText = escapeProfileSetupEmailHtml(paragraph).replace(/\n/g, "<br>");
+      if (isProposalContentHeading(trimmedParagraph)) {
+        return `<p style="color:${letterhead.headingColor};font-weight:700;font-size:16px;letter-spacing:.02em;">${safeText}</p>`;
+      }
+
       return `<p>${safeText}</p>`;
     })
     .join("\n");
 }
 
-function drawProposalLetterhead(doc) {
+function drawProposalLetterhead(doc, proposal = {}) {
+  const letterhead = getProposalLetterheadConfig(proposal);
   const pageWidth = doc.page.width;
   const pageHeight = doc.page.height;
-  const headerHeight = 156;
-  const footerHeight = 156;
+  const { headerHeight, footerHeight } = letterhead;
   const drawMissingStrip = (label, y, height, { showLabel = true } = {}) => {
     doc
       .save()
@@ -2023,7 +2102,7 @@ function drawProposalLetterhead(doc) {
 
     doc
       .save()
-      .fillColor("#0f766e")
+      .fillColor(letterhead.fallbackColor)
       .fontSize(10)
       .text(label, 52, y + 18, {
         width: pageWidth - 104,
@@ -2034,36 +2113,36 @@ function drawProposalLetterhead(doc) {
   };
 
   try {
-    if (fs.existsSync(PROPOSAL_LETTERHEAD_HEADER_PATH)) {
-      const headerBuffer = fs.readFileSync(PROPOSAL_LETTERHEAD_HEADER_PATH);
+    if (fs.existsSync(letterhead.headerPath)) {
+      const headerBuffer = fs.readFileSync(letterhead.headerPath);
       doc.image(headerBuffer, 0, 0, {
         width: pageWidth,
         height: headerHeight,
       });
     } else {
-      console.error("Proposal header image missing:", PROPOSAL_LETTERHEAD_HEADER_PATH);
-      drawMissingStrip("Metrics Mart Proposal Header", 0, headerHeight);
+      console.error("Proposal header image missing:", letterhead.headerPath);
+      drawMissingStrip(`${letterhead.brandName} Proposal Header`, 0, headerHeight);
     }
   } catch (err) {
     console.error(
       "Proposal header image failed:",
       err.message,
-      PROPOSAL_LETTERHEAD_HEADER_PATH,
+      letterhead.headerPath,
     );
-    drawMissingStrip("Metrics Mart Proposal Header", 0, headerHeight);
+    drawMissingStrip(`${letterhead.brandName} Proposal Header`, 0, headerHeight);
   }
 
   try {
-    if (fs.existsSync(PROPOSAL_LETTERHEAD_FOOTER_PATH)) {
-      const footerBuffer = fs.readFileSync(PROPOSAL_LETTERHEAD_FOOTER_PATH);
+    if (fs.existsSync(letterhead.footerPath)) {
+      const footerBuffer = fs.readFileSync(letterhead.footerPath);
       doc.image(footerBuffer, 0, pageHeight - footerHeight, {
         width: pageWidth,
         height: footerHeight,
       });
     } else {
-      console.error("Proposal footer image missing:", PROPOSAL_LETTERHEAD_FOOTER_PATH);
+      console.error("Proposal footer image missing:", letterhead.footerPath);
       drawMissingStrip(
-        "info@metricsmart.in | www.metricsmartinfoline.com",
+        letterhead.footerFallbackLabel,
         pageHeight - footerHeight,
         footerHeight,
         { showLabel: false },
@@ -2073,10 +2152,10 @@ function drawProposalLetterhead(doc) {
     console.error(
       "Proposal footer image failed:",
       err.message,
-      PROPOSAL_LETTERHEAD_FOOTER_PATH,
+      letterhead.footerPath,
     );
     drawMissingStrip(
-      "info@metricsmart.in | www.metricsmartinfoline.com",
+      letterhead.footerFallbackLabel,
       pageHeight - footerHeight,
       footerHeight,
       { showLabel: false },
@@ -2159,10 +2238,12 @@ function createProposalPdfDocument() {
 }
 
 function writeProposalPdfDocument(doc, proposal) {
-  drawProposalLetterhead(doc);
+  const letterhead = getProposalLetterheadConfig(proposal);
+
+  drawProposalLetterhead(doc, proposal);
   doc.y = doc.page.margins.top;
   doc.on("pageAdded", () => {
-    drawProposalLetterhead(doc);
+    drawProposalLetterhead(doc, proposal);
     doc.y = doc.page.margins.top;
   });
 
@@ -2199,10 +2280,10 @@ function writeProposalPdfDocument(doc, proposal) {
         return;
       }
 
-      const isHeading = /^[A-Z0-9 &/.-]+:$/.test(trimmed) || trimmed === "PROJECT PROPOSAL";
+      const isHeading = isProposalContentHeading(trimmed);
       writeProposalPdfText(doc, trimmed, {
         fontSize: isHeading ? 12 : 10,
-        color: isHeading ? "#0f766e" : "#111827",
+        color: isHeading ? letterhead.headingColor : "#111827",
         lineGap: 3,
         gapAfter: isHeading ? 3 : 1,
       });
@@ -4984,6 +5065,7 @@ async function ensureProposalTables() {
       timeline varchar(100) DEFAULT NULL,
       technology varchar(255) DEFAULT NULL,
       notes text DEFAULT NULL,
+      company_scope varchar(100) DEFAULT NULL,
       proposal_content longtext NOT NULL,
       created_by int DEFAULT NULL,
       status varchar(50) NOT NULL DEFAULT 'draft',
@@ -4997,6 +5079,10 @@ async function ensureProposalTables() {
 
   await runSchemaChange(
     "ALTER TABLE proposals ADD COLUMN client_email varchar(255) DEFAULT NULL AFTER client_name",
+    "ER_DUP_FIELDNAME",
+  );
+  await runSchemaChange(
+    "ALTER TABLE proposals ADD COLUMN company_scope varchar(100) DEFAULT NULL AFTER notes",
     "ER_DUP_FIELDNAME",
   );
 
@@ -17960,7 +18046,7 @@ async function getProposalById(proposalId) {
   await ensureProposalTables();
   const [rows] = await dbPromise.query(
     `
-      SELECT p.*, u.name AS created_by_name
+      SELECT p.*, u.name AS created_by_name, u.comp_name AS created_by_company
       FROM proposals p
       LEFT JOIN users u ON u.id = p.created_by
       WHERE p.id = ?
@@ -18093,6 +18179,13 @@ app.post("/api/generate-proposal", async (req, res) => {
       timeline: String(req.body?.timeline || "").trim(),
       technology: String(req.body?.technology || "Core PHP + MySQL").trim(),
       notes: String(req.body?.notes || "").trim(),
+      company_scope:
+        normalizeLoginCompanyKey(
+          req.body?.company_scope ||
+            req.body?.company_key ||
+            req.body?.selected_company ||
+            req.body?.comp_name,
+        ) || "metrics",
     };
     const createdBy = Number(req.body?.created_by || 0) || null;
 
@@ -18138,8 +18231,8 @@ app.post("/api/generate-proposal", async (req, res) => {
     const [result] = await dbPromise.query(
       `
         INSERT INTO proposals
-          (client_name, client_email, company_name, project_topic, requirement_details, budget, timeline, technology, notes, proposal_content, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (client_name, client_email, company_name, project_topic, requirement_details, budget, timeline, technology, notes, company_scope, proposal_content, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         payload.client_name,
@@ -18151,6 +18244,7 @@ app.post("/api/generate-proposal", async (req, res) => {
         payload.timeline,
         payload.technology,
         payload.notes,
+        payload.company_scope,
         proposalContent,
         createdBy,
       ],
@@ -18160,6 +18254,7 @@ app.post("/api/generate-proposal", async (req, res) => {
       success: true,
       proposal_id: result.insertId,
       proposal_content: proposalContent,
+      company_scope: payload.company_scope,
     });
   } catch (error) {
     console.error("Proposal generate error:", error);
@@ -18184,8 +18279,8 @@ app.get("/api/proposals", async (req, res) => {
 
     const [rows] = await dbPromise.query(
       `
-        SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, p.status, p.created_at, p.updated_at,
-               u.name AS created_by_name
+        SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, p.company_scope, p.status, p.created_at, p.updated_at,
+               u.name AS created_by_name, u.comp_name AS created_by_company
         FROM proposals p
         LEFT JOIN users u ON u.id = p.created_by
         ${whereSql}
@@ -18254,6 +18349,7 @@ app.put("/api/proposals/:id", async (req, res) => {
             timeline = COALESCE(?, timeline),
             technology = COALESCE(?, technology),
             notes = COALESCE(?, notes),
+            company_scope = COALESCE(?, company_scope),
             proposal_content = ?,
             status = ?
         WHERE id = ?
@@ -18268,6 +18364,12 @@ app.put("/api/proposals/:id", async (req, res) => {
         optionalProposalField("timeline"),
         optionalProposalField("technology"),
         optionalProposalField("notes"),
+        normalizeLoginCompanyKey(
+          body.company_scope ||
+            body.company_key ||
+            body.selected_company ||
+            body.comp_name,
+        ) || null,
         proposalContent,
         status || "draft",
         req.params.id,
@@ -18333,13 +18435,14 @@ app.get("/api/proposals/:id/word", async (req, res) => {
     }
 
     const fileName = `proposal_${proposal.id}.doc`;
-    const headerDataUri = getProposalLetterheadDataUri(PROPOSAL_LETTERHEAD_HEADER_PATH);
-    const footerDataUri = getProposalLetterheadDataUri(PROPOSAL_LETTERHEAD_FOOTER_PATH);
+    const letterhead = getProposalLetterheadConfig(proposal);
+    const headerDataUri = getProposalLetterheadDataUri(letterhead.headerPath);
+    const footerDataUri = getProposalLetterheadDataUri(letterhead.footerPath);
     const headerHtml = headerDataUri
-      ? `<img src="${headerDataUri}" alt="Metrics Mart header" style="display:block;width:100%;height:auto;">`
+      ? `<img src="${headerDataUri}" alt="${escapeProfileSetupEmailHtml(letterhead.brandName)} header" style="display:block;width:100%;height:auto;">`
       : "";
     const footerHtml = footerDataUri
-      ? `<img src="${footerDataUri}" alt="Metrics Mart footer" style="display:block;width:100%;height:auto;">`
+      ? `<img src="${footerDataUri}" alt="${escapeProfileSetupEmailHtml(letterhead.brandName)} footer" style="display:block;width:100%;height:auto;">`
       : "";
     const html = `
       <!doctype html>
@@ -18361,7 +18464,7 @@ app.get("/api/proposals/:id/word", async (req, res) => {
             <h1 style="text-align:center;color:#0f172a;">${escapeProfileSetupEmailHtml(proposal.project_topic || "Project Proposal")}</h1>
             <p><strong>Client:</strong> ${escapeProfileSetupEmailHtml(proposal.client_name || "-")}</p>
             <p><strong>Company:</strong> ${escapeProfileSetupEmailHtml(proposal.company_name || "-")}</p>
-            ${renderProposalHtml(proposal.proposal_content)}
+            ${renderProposalHtml(proposal.proposal_content, proposal)}
           </main>
           ${footerHtml.replace("style=\"display:block;width:100%;height:auto;\"", "class=\"proposal-letterhead\"")}
         </body>
