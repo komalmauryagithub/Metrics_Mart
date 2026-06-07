@@ -3122,8 +3122,13 @@ const uploadLeaveAttachment = uploadLeave.fields(
 // ====================== DATABASE CONNECTION ======================
 
 function getDatabaseConfig() {
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
+  const databaseUrl =
+    process.env.DATABASE_URL ||
+    process.env.MYSQL_PUBLIC_URL ||
+    process.env.MYSQL_URL;
+
+  if (databaseUrl) {
+    return databaseUrl;
   }
 
   return {
@@ -8117,7 +8122,7 @@ async function getCompanyScopeForUser(userId) {
   return getLoginCompanyName(companyKey || "metrics");
 }
 
-app.post("/login", async (req, res) => {
+async function handleLogin(req, res) {
   const { emailOrContact, email, password } = req.body || {};
   const loginId = (emailOrContact || email || "").trim();
   const companyKey = normalizeLoginCompanyKey(
@@ -8132,31 +8137,54 @@ app.post("/login", async (req, res) => {
   }
 
   const companyCondition = getLoginCompanyCondition(companyKey);
-  const sql = `
-    SELECT
-      id,
-      name,
-      email,
-      contact,
-      role,
-      comp_name,
-      prof_img,
-      profile_setup_status,
-      profile_setup_expires_at,
-      profile_setup_completed_at
+  const loginParams = [
+    loginId,
+    loginId,
+    password,
+    ...companyCondition.params,
+  ];
+  const coreColumns = `
+    id,
+    name,
+    email,
+    contact,
+    role,
+    comp_name,
+    prof_img
+  `;
+  const whereClause = `
     FROM users
     WHERE (email = ? OR contact = ?) AND spswd = ?
     ${companyCondition.sql}
   `;
+  const sql = `
+    SELECT
+      ${coreColumns},
+      profile_setup_status,
+      profile_setup_expires_at,
+      profile_setup_completed_at
+    ${whereClause}
+  `;
 
   try {
-    await ensureUserProfileSetupColumns();
-    const [results] = await dbPromise.query(sql, [
-      loginId,
-      loginId,
-      password,
-      ...companyCondition.params,
-    ]);
+    let results;
+
+    try {
+      [results] = await dbPromise.query(sql, loginParams);
+    } catch (err) {
+      if (err.code !== "ER_BAD_FIELD_ERROR") throw err;
+
+      console.warn(
+        "Login profile columns are missing; using the core user schema.",
+      );
+      [results] = await dbPromise.query(
+        `
+          SELECT ${coreColumns}
+          ${whereClause}
+        `,
+        loginParams,
+      );
+    }
 
     if (results.length > 0) {
       const user = results[0];
@@ -8183,10 +8211,13 @@ app.post("/login", async (req, res) => {
     console.error("Login DB Error:", err);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Login database is unavailable. Please try again shortly.",
     });
   }
-});
+}
+
+app.post("/login", handleLogin);
+app.post("/api/login", handleLogin);
 
 app.get("/api/admin/users/:id", async (req, res) => {
   const userId = Number(req.params.id);
