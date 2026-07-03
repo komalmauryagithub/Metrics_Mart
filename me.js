@@ -45,32 +45,6 @@ const BASE_URL =
     : ["localhost", "127.0.0.1"].includes(window.location.hostname)
       ? "http://localhost:3000"
       : window.location.origin;
-
-function normalizeCurrentUserId(user = {}) {
-  const candidates = [
-    user.id,
-    user.user_id,
-    user.userId,
-    user.employee_id,
-    user.employeeId,
-  ];
-
-  for (const candidate of candidates) {
-    const id = Number(candidate);
-    if (Number.isFinite(id) && id > 0) return id;
-  }
-
-  return 0;
-}
-
-function hydrateCurrentUserIdentity() {
-  if (!currentUser) return 0;
-  const userId = normalizeCurrentUserId(currentUser);
-  if (userId) currentUser.id = userId;
-  if (!currentUser.role) currentUser.role = "me";
-  return userId;
-}
-
 const PROPOSAL_LETTERHEAD_HEADER_URL = `${BASE_URL}/letterhead-header.jpeg`;
 const PROPOSAL_LETTERHEAD_FOOTER_URL = `${BASE_URL}/letterhead-footer.jpeg`;
 const PROPOSAL_REDSEA_LETTERHEAD_HEADER_URL = `${BASE_URL}/redsea-letterhead-header.jpeg`;
@@ -211,8 +185,6 @@ function loadUser() {
   }
 
   currentUser = JSON.parse(user);
-  hydrateCurrentUserIdentity();
-  localStorage.setItem("currentUser", JSON.stringify(currentUser));
 
   document.getElementById("userName").textContent = currentUser.name;
 
@@ -873,7 +845,6 @@ async function handleMeLeadFormSubmit(event) {
   const salesTypeValue = formData.get("sales_type") || "new";
   const renewalCreator =
     salesTypeValue === "renewal" ? meRenewalAttribution : null;
-  const currentUserId = hydrateCurrentUserIdentity();
 
   const data = {
     company: formData.get("company"),
@@ -916,8 +887,7 @@ async function handleMeLeadFormSubmit(event) {
       actionTypeValue === "followup" ? formData.get("follow_time") : null,
     reason: actionTypeValue === "followup" ? formData.get("reason") : null,
     additional_notes: formData.get("additional_notes"),
-    created_by: renewalCreator?.createdBy || currentUserId || null,
-    user_id: renewalCreator?.createdBy || currentUserId || null,
+    created_by: renewalCreator?.createdBy || currentUser?.id || null,
     created_by_name: renewalCreator?.createdByName || currentUser?.name || "",
     notify_whatsapp: false,
   };

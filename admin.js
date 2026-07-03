@@ -74,31 +74,6 @@ const BASE_URL =
 const REDSEA_ADMIN_PROFILE_IMAGE = "uploads/redsea-admin-profile.jpeg";
 const METRICS_ADMIN_PROFILE_IMAGE = "uploads/metrics-admin-profile.jpeg";
 
-function normalizeCurrentUserId(user = {}) {
-    const candidates = [
-        user.id,
-        user.user_id,
-        user.userId,
-        user.employee_id,
-        user.employeeId,
-    ];
-
-    for (const candidate of candidates) {
-        const id = Number(candidate);
-        if (Number.isFinite(id) && id > 0) return id;
-    }
-
-    return 0;
-}
-
-function hydrateCurrentUserIdentity() {
-    if (!currentUser) return 0;
-    const userId = normalizeCurrentUserId(currentUser);
-    if (userId) currentUser.id = userId;
-    if (!currentUser.role) currentUser.role = "admin";
-    return userId;
-}
-
 function normalizeAdminPanelCompanyKey(value) {
     const normalized = String(value || "")
         .toLowerCase()
@@ -266,8 +241,6 @@ function loadUser() {
 
     try {
         currentUser = JSON.parse(user);
-        hydrateCurrentUserIdentity();
-        localStorage.setItem("currentUser", JSON.stringify(currentUser));
     } catch (err) {
         localStorage.removeItem("currentUser");
         showPopup("Session Expired", "Login again", false);
@@ -4586,7 +4559,6 @@ async function handleAdminLeadFormSubmit(event) {
     const originalText = submitBtn ? submitBtn.innerHTML : "";
     const mapsLink = document.getElementById("adminLeadMapsLink")?.value || "";
     const locationValue = formData.get("location") || mapsLink || "";
-    const currentUserId = hydrateCurrentUserIdentity();
 
     const data = {
         company: formData.get("company"),
@@ -4624,8 +4596,7 @@ async function handleAdminLeadFormSubmit(event) {
             actionTypeValue === "followup" ? formData.get("follow_time") : null,
         reason: actionTypeValue === "followup" ? formData.get("reason") : null,
         additional_notes: formData.get("additional_notes"),
-        created_by: currentUserId || null,
-        user_id: currentUserId || null,
+        created_by: currentUser?.id || null,
         created_by_name: currentUser?.name || "",
         notify_whatsapp: false,
     };
