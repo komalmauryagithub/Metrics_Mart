@@ -9175,7 +9175,7 @@ app.get("/api/leads", (req, res) => {
 
   // 🔥 normalize role
   role = role ? role.toLowerCase().trim() : "";
-  if (role === "admin") {
+  if (role === "admin" || role === "tme") {
     leadScopeSql = "";
   }
 
@@ -9512,13 +9512,15 @@ app.get("/api/appointments", async (req, res) => {
       .toLowerCase()
       .trim(),
   );
-  const appointmentStageSql =
-    role === "admin" ? getLegacyAppointmentStageSql() : getAppointmentStageSql();
+  const useLegacyLeadSchema = role === "admin" || role === "tme";
+  const appointmentStageSql = useLegacyLeadSchema
+    ? getLegacyAppointmentStageSql()
+    : getAppointmentStageSql();
 
   let sql = "";
   let params = [];
   const scopedWhereParts = [];
-  if (role !== "admin") {
+  if (!useLegacyLeadSchema) {
     addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
   }
 
@@ -9579,7 +9581,7 @@ app.get("/api/appointments", async (req, res) => {
   }
 
   try {
-    if (role !== "admin") {
+    if (!useLegacyLeadSchema) {
       await ensureLeadAppointmentStatusColumn();
       await ensureLeadCompanyScopeColumn();
     }
