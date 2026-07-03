@@ -445,6 +445,17 @@ function normalizePositiveId(value) {
   return Number.isFinite(id) && id > 0 ? id : 0;
 }
 
+function resolveLeadListUserId(req) {
+  return normalizePositiveId(
+    req?.query?.userId ||
+      req?.query?.user_id ||
+      req?.query?.created_by ||
+      req?.body?.userId ||
+      req?.body?.user_id ||
+      req?.body?.created_by,
+  );
+}
+
 async function getDealOwnerScope(userId) {
   const normalizedUserId = normalizePositiveId(userId);
 
@@ -9143,7 +9154,8 @@ app.post("/api/leads", async (req, res) => {
 
 // ====================== GET ALL LEADS ======================
 app.get("/api/leads", (req, res) => {
-  let { userId, role } = req.query;
+  let { role } = req.query;
+  const userId = resolveLeadListUserId(req);
   const scope = String(req.query.scope || "")
     .toLowerCase()
     .trim();

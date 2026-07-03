@@ -1390,7 +1390,7 @@ async function loadLeads() {
                 <td>${lead.id}</td>
                 <td>${lead.company_name || '-'}</td>
                 <td>${lead.client_name || '-'}</td>
-                <td>${lead.contact || '-'}</td>
+                <td>${lead.contact || lead.telephone || '-'}</td>
                 <td>${lead.email || '-'}</td>
                 <td>${lead.action_type || '-'}</td>
             </tr>

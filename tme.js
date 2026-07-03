@@ -47,6 +47,31 @@ const BASE_URL =
       ? "http://localhost:3000"
       : window.location.origin;
 
+function normalizeCurrentUserId(user = {}) {
+  const candidates = [
+    user.id,
+    user.user_id,
+    user.userId,
+    user.employee_id,
+    user.employeeId,
+  ];
+
+  for (const candidate of candidates) {
+    const id = Number(candidate);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+
+  return 0;
+}
+
+function hydrateCurrentUserIdentity() {
+  if (!currentUser) return 0;
+  const userId = normalizeCurrentUserId(currentUser);
+  if (userId) currentUser.id = userId;
+  if (!currentUser.role) currentUser.role = "tme";
+  return userId;
+}
+
 function getEmptyTrackerCounts() {
   return {
     total: 0,
@@ -1870,6 +1895,8 @@ function loadUserFromLocalStorage() {
   }
 
   currentUser = JSON.parse(userStr);
+  hydrateCurrentUserIdentity();
+  localStorage.setItem("currentUser", JSON.stringify(currentUser));
 
   document.getElementById("userName").textContent =
     currentUser.name || "TME User";
@@ -3301,10 +3328,11 @@ async function loadLeads() {
   if (!tbody) return;
 
   try {
+    const currentUserId = hydrateCurrentUserIdentity();
     const url =
       currentUser.role === "admin"
         ? `${BASE_URL}/api/leads?role=admin`
-        : `${BASE_URL}/api/leads?userId=${currentUser.id}&role=${currentUser.role}&scope=assigned`;
+        : `${BASE_URL}/api/leads?userId=${currentUserId || currentUser.id}&role=${currentUser.role}&scope=assigned`;
 
     // ✅ Sirf ye use kar
     const res = await fetch(url);
@@ -3335,7 +3363,7 @@ async function loadLeads() {
             <td>${index + 1}</td>
             <td><strong>${escapeTmeHtml(lead.company_name || "-")}</strong></td>
             <td>${escapeTmeHtml(lead.client_name || "-")}</td>
-            <td>${escapeTmeHtml(lead.contact || "-")}</td>
+            <td>${escapeTmeHtml(lead.contact || lead.telephone || "-")}</td>
             <td>${escapeTmeHtml(lead.city || "-")}</td>
             <td>${escapeTmeHtml(lead.source_lead || "-")}</td>
 
