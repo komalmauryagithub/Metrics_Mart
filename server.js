@@ -494,8 +494,8 @@ function getDealRenewalMatchCondition(dealAlias = "l", renewalAlias = "rl") {
   const identityClause = `
     (
       (
-        NULLIF(TRIM(COALESCE(${dealAlias}.contact, '')), '') IS NOT NULL
-        AND TRIM(COALESCE(${renewalAlias}.contact, '')) = TRIM(COALESCE(${dealAlias}.contact, ''))
+        NULLIF(TRIM(COALESCE(${dealAlias}.telephone, '')), '') IS NOT NULL
+        AND TRIM(COALESCE(${renewalAlias}.telephone, '')) = TRIM(COALESCE(${dealAlias}.telephone, ''))
       )
       OR (
         NULLIF(TRIM(COALESCE(${dealAlias}.email, '')), '') IS NOT NULL
@@ -9084,8 +9084,8 @@ app.post("/api/leads", async (req, res) => {
 
   const sql = `
       INSERT INTO leads (
-        company_name, client_name, contact, alternate_contact,
-        telephone, email, gst_no,
+        company_name, client_name, telephone, alternate_contact,
+        email, gst_no,
         flat_no, building_name, locality, city, pincode, state, maps_lnk,
         source_lead, sales_type, renewal_source_lead_id, industry_type,
         web_type, seo_type, smo_type, app_type, erp_type, services,
@@ -9096,15 +9096,14 @@ app.post("/api/leads", async (req, res) => {
         additional_notes,
         created_by,
         company_scope
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
   const values = [
     normalizeRequiredLeadText(data.company),
     normalizeRequiredLeadText(data.client),
-    normalizeRequiredLeadText(data.contact),
+    normalizeRequiredLeadText(data.telephone || data.contact),
     data.alt_contact || null,
-    data.telephone || null,
     data.email || null,
     data.gst_no || null,
     data.flat_no || null,
@@ -9328,9 +9327,8 @@ app.put("/api/leads/:id", async (req, res) => {
         UPDATE leads
         SET company_name = ?,
             client_name = ?,
-            contact = ?,
-            alternate_contact = ?,
             telephone = ?,
+            alternate_contact = ?,
             email = ?,
             gst_no = ?,
             flat_no = ?,
@@ -9368,9 +9366,8 @@ app.put("/api/leads/:id", async (req, res) => {
       const values = [
         data.company || null,
         data.client || null,
-        data.contact || null,
+        data.telephone || data.contact || null,
         data.alt_contact || null,
-        data.telephone || null,
         data.email || null,
         data.gst_no || null,
         data.flat_no || null,
@@ -9971,26 +9968,24 @@ app.put(
 app.get("/api/admin/renewals", async (req, res) => {
   try {
     await ensureLeadRenewalSourceColumn();
-    await ensureLeadCompanyScopeColumn();
 
     const lookaheadDays = normalizeRenewalLookaheadDays(req.query.days);
-    const companyScope = getRequestedCompanyScope(req);
+    const companyScope = "";
     const renewalDueDateSql = "DATE_ADD(DATE(l.closed_date), INTERVAL 1 YEAR)";
     const closedRenewalMatchCondition = getDealRenewalMatchCondition("l", "rcl");
-    const closedRenewalScopeSql = getCompanyLeadScopeSql(companyScope, "rcl");
+    const closedRenewalScopeSql = "";
     const whereParts = [
       "l.lead_status = 'deal_closed'",
       "l.closed_date IS NOT NULL",
       `${renewalDueDateSql} <= DATE_ADD(CURDATE(), INTERVAL ${lookaheadDays} DAY)`,
     ];
-    addRequestedLeadCompanyScope(req, whereParts, "l");
 
     const sql = `
       SELECT
         l.id,
         l.company_name,
         l.client_name,
-        l.contact,
+        l.telephone AS contact,
         l.email,
         l.city,
         l.services,
@@ -15513,7 +15508,7 @@ async function sendProjectAssignmentsByUser(
       l.id AS project_id,
       l.company_name AS projectName,
       l.client_name AS client,
-      l.contact AS clientContact,
+      l.telephone AS clientContact,
       l.alternate_contact AS clientAlternateContact,
       l.telephone AS clientTelephone,
       l.email AS clientEmail,
@@ -15574,7 +15569,7 @@ async function sendSeoProjectAssignments(
       l.id AS project_id,
       l.company_name AS projectName,
       l.client_name AS client,
-      l.contact AS clientContact,
+      l.telephone AS clientContact,
       l.alternate_contact AS clientAlternateContact,
       l.telephone AS clientTelephone,
       l.email AS clientEmail,
@@ -15659,7 +15654,7 @@ async function getProjectAssignmentRecord(assignmentId, userId = null) {
       pa.assigned_at,
       l.company_name AS projectName,
       l.client_name AS client,
-      l.contact AS clientContact,
+      l.telephone AS clientContact,
       l.alternate_contact AS clientAlternateContact,
       l.telephone AS clientTelephone,
       l.email AS clientEmail,
