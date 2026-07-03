@@ -31,6 +31,17 @@ const PHASE_TRACKER_DRAFTS_KEY =
 const PHASE_TRACKER_LOCAL_NOTE =
   "Due to a server sync issue, these details were saved in a local backup. They will sync to the database as soon as the API is available.";
 
+function getCurrentUserId() {
+  return Number(
+    currentUser?.id ||
+      currentUser?.userId ||
+      currentUser?.user_id ||
+      currentUser?.employeeId ||
+      currentUser?.employee_id ||
+      0,
+  );
+}
+
 function getPhaseTrackerLocalNote(serviceValue = "") {
   return PHASE_TRACKER_LOCAL_NOTE;
 }
@@ -933,6 +944,10 @@ function loadUser() {
   }
 
   currentUser = JSON.parse(user);
+  const normalizedUserId = getCurrentUserId();
+  if (normalizedUserId) {
+    currentUser.id = normalizedUserId;
+  }
   document.getElementById("userName").textContent =
     currentUser.name || DASHBOARD_USER_LABEL;
   const roleLabel = String(
@@ -1107,10 +1122,11 @@ async function fetchDevAttendanceSummary() {
   const statusEl = document.getElementById("dashboardAttendance");
   const timeEl = document.getElementById("dashboardAttendanceTime");
   if (!statusEl && !timeEl) return;
-  if (!currentUser?.id) return;
+  const userId = getCurrentUserId();
+  if (!userId) return;
 
   try {
-    const res = await fetch(`${BASE_URL}/api/attendance/${currentUser.id}`, {
+    const res = await fetch(`${BASE_URL}/api/attendance/${userId}`, {
       cache: "no-store",
     });
     const result = await res.json();
@@ -1150,14 +1166,15 @@ function loadDevDashboard() {
 }
 
 async function fetchAttendance() {
-  if (!currentUser || !currentUser.id) return;
+  const userId = getCurrentUserId();
+  if (!userId) return;
 
   const tbody = document.getElementById("attendanceTableBody");
   const actions = document.getElementById("attendanceActions");
   if (!tbody) return;
 
   try {
-    const res = await fetch(`${BASE_URL}/api/attendance/${currentUser.id}`);
+    const res = await fetch(`${BASE_URL}/api/attendance/${userId}`);
     const result = await res.json();
     const rows = result.success ? result.data || [] : [];
     const today = formatDateKey(new Date());
@@ -1216,7 +1233,11 @@ async function fetchAttendance() {
 }
 
 async function markAttendance(type) {
-  if (!currentUser || !currentUser.id) return;
+  const userId = getCurrentUserId();
+  if (!userId) {
+    showPopup("Attendance", "User ID missing. Please login again.", false);
+    return;
+  }
   if (attendanceUpdating) return;
 
   const url =
@@ -1238,7 +1259,7 @@ async function markAttendance(type) {
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: currentUser.id, ...location, ...facePayload }),
+      body: JSON.stringify({ userId, user_id: userId, ...location, ...facePayload }),
     });
     const result = await res.json();
 

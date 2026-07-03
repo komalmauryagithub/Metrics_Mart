@@ -4892,6 +4892,7 @@ async function ensureAttendanceTable() {
 
   await dbPromise.query(sql);
   const columns = [
+    "ADD COLUMN attendance_date date DEFAULT NULL AFTER user_id",
     "ADD COLUMN check_in_lat decimal(10,8) DEFAULT NULL AFTER check_out",
     "ADD COLUMN check_in_lng decimal(11,8) DEFAULT NULL AFTER check_in_lat",
     "ADD COLUMN check_in_location varchar(500) DEFAULT NULL AFTER check_in_lng",
@@ -4903,6 +4904,12 @@ async function ensureAttendanceTable() {
   for (const columnSql of columns) {
     await runSchemaChange(`ALTER TABLE attendance ${columnSql}`, "ER_DUP_FIELDNAME");
   }
+
+  await dbPromise.query(`
+    UPDATE attendance
+    SET attendance_date = COALESCE(attendance_date, DATE(check_in), CURDATE())
+    WHERE attendance_date IS NULL
+  `);
 
   const statusColumn = await getSchemaColumnInfo("attendance", "status");
   if (
@@ -10829,7 +10836,7 @@ app.get("/api/attendance/:userId", async (req, res) => {
 });
 
 app.post("/api/attendance/check-in", async (req, res) => {
-  const userId = Number(req.body.userId);
+  const userId = Number(req.body.userId || req.body.user_id || req.body.created_by);
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);
   const accuracyMeters = Number(req.body.accuracy);
@@ -10959,7 +10966,7 @@ app.post("/api/attendance/check-in", async (req, res) => {
 });
 
 app.put("/api/attendance/check-out", async (req, res) => {
-  const userId = Number(req.body.userId);
+  const userId = Number(req.body.userId || req.body.user_id || req.body.created_by);
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);
   const accuracyMeters = Number(req.body.accuracy);
