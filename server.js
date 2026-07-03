@@ -3848,7 +3848,7 @@ async function fetchProjectTrackerData(scope, userId = null, companyScope = "") 
         l.id AS project_id,
         l.company_name AS projectName,
         l.client_name AS client,
-        l.contact AS clientContact,
+        l.telephone AS clientContact,
         l.alternate_contact AS clientAlternateContact,
         l.telephone AS clientTelephone,
         l.email AS clientEmail,
@@ -4477,6 +4477,17 @@ function getAppointmentStageSql() {
         OR lead_status = 'not_interested' THEN 'not_confirmed'
       WHEN COALESCE(NULLIF(appointment_status, ''), '') = 'confirmed'
         OR lead_status = 'followup' THEN 'confirmed'
+      ELSE 'generated'
+    END
+  `;
+}
+
+function getLegacyAppointmentStageSql() {
+  return `
+    CASE
+      WHEN lead_status = 'deal_closed' THEN 'deal_closed'
+      WHEN lead_status = 'not_interested' THEN 'not_confirmed'
+      WHEN lead_status = 'followup' THEN 'confirmed'
       ELSE 'generated'
     END
   `;
@@ -9160,18 +9171,19 @@ app.get("/api/leads", (req, res) => {
     .toLowerCase()
     .trim();
   const companyScope = getRequestedCompanyScope(req);
-  const leadScopeSql = getCompanyLeadScopeSql(companyScope, "leads");
+  let leadScopeSql = getCompanyLeadScopeSql(companyScope, "leads");
 
   // 🔥 normalize role
   role = role ? role.toLowerCase().trim() : "";
+  if (role === "admin") {
+    leadScopeSql = "";
+  }
 
   let sql = "";
   let values = [];
 
   if (role === "admin") {
-    const whereParts = [];
-    if (leadScopeSql) whereParts.push(leadScopeSql);
-    sql = `SELECT * FROM leads${whereParts.length ? ` WHERE ${whereParts.join(" AND ")}` : ""} ORDER BY id ASC`;
+    sql = "SELECT * FROM leads ORDER BY id ASC";
   } else if (role === "tme") {
     if (!userId) {
       return res
@@ -9500,17 +9512,21 @@ app.get("/api/appointments", async (req, res) => {
       .toLowerCase()
       .trim(),
   );
+  const appointmentStageSql =
+    role === "admin" ? getLegacyAppointmentStageSql() : getAppointmentStageSql();
 
   let sql = "";
   let params = [];
   const scopedWhereParts = [];
-  addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+  if (role !== "admin") {
+    addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
+  }
 
   if (includeHistory) {
     sql = `
       SELECT
         *,
-        ${getAppointmentStageSql()} AS appointment_stage
+        ${appointmentStageSql} AS appointment_stage
       FROM leads
       WHERE app_date IS NOT NULL
     `;
@@ -9535,7 +9551,7 @@ app.get("/api/appointments", async (req, res) => {
     sql = `
       SELECT
         *,
-        ${getAppointmentStageSql()} AS appointment_stage
+        ${appointmentStageSql} AS appointment_stage
       FROM leads
       WHERE action_type = 'appointment'
       ${scopedWhereParts.length ? `AND ${scopedWhereParts.join(" AND ")}` : ""}
@@ -9552,7 +9568,7 @@ app.get("/api/appointments", async (req, res) => {
     sql = `
       SELECT
         *,
-        ${getAppointmentStageSql()} AS appointment_stage
+        ${appointmentStageSql} AS appointment_stage
       FROM leads
       WHERE action_type = 'appointment'
         AND created_by = ?
@@ -9563,8 +9579,10 @@ app.get("/api/appointments", async (req, res) => {
   }
 
   try {
-    await ensureLeadAppointmentStatusColumn();
-    await ensureLeadCompanyScopeColumn();
+    if (role !== "admin") {
+      await ensureLeadAppointmentStatusColumn();
+      await ensureLeadCompanyScopeColumn();
+    }
     const [result] = await dbPromise.query(sql, params);
     res.json({ success: true, data: result });
   } catch (err) {
@@ -14935,19 +14953,11 @@ app.get("/api/reports/counts", (req, res) => {
   let followQuery = "";
 
   if (role === "admin") {
-    const scopedWhereParts = [];
-    addRequestedLeadCompanyScope(req, scopedWhereParts, "leads");
-    const scopeWhere = scopedWhereParts.length
-      ? ` WHERE ${scopedWhereParts.join(" AND ")}`
-      : "";
-    const scopeAnd = scopedWhereParts.length
-      ? ` AND ${scopedWhereParts.join(" AND ")}`
-      : "";
-    leadQuery = `SELECT COUNT(*) AS total FROM leads${scopeWhere}`;
+    leadQuery = "SELECT COUNT(*) AS total FROM leads";
     appointmentQuery =
-      `SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment'${scopeAnd}`;
+      "SELECT COUNT(*) AS total FROM leads WHERE action_type='appointment'";
     followQuery =
-      `SELECT COUNT(*) AS total FROM leads WHERE action_type='followup'${scopeAnd}`;
+      "SELECT COUNT(*) AS total FROM leads WHERE action_type='followup'";
 
     db.query(leadQuery, (err, leads) => {
       db.query(appointmentQuery, (err2, appointments) => {
@@ -16107,12 +16117,14 @@ app.get("/api/project-tracker", async (req, res) => {
   try {
     await ensureProjectAssignmentWorkflowColumns();
     await ensureProjectPhaseDetailsTable();
-    await ensureLeadCompanyScopeColumn();
+    if (scope !== "admin") {
+      await ensureLeadCompanyScopeColumn();
+    }
 
     const payload = await fetchProjectTrackerData(
       scope,
       userId,
-      getRequestedCompanyScope(req),
+      scope === "admin" ? "" : getRequestedCompanyScope(req),
     );
     res.json({
       success: true,
