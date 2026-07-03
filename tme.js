@@ -3208,6 +3208,7 @@ document
     const renewalCreator =
       !isEditMode && salesTypeValue === "renewal" ? renewalLeadAttribution : null;
     const currentUserId = hydrateCurrentUserIdentity();
+    const primaryTelephone = form.get("contact") || form.get("telephone") || "";
     const selectedEmployee = getSelectedEmployeeMeta("lead_assign_emp");
     const shouldNotifyWhatsApp =
       !isEditMode && Boolean(selectedEmployee.name);
@@ -3217,9 +3218,8 @@ document
     const data = {
       company: form.get("company"),
       client: form.get("client"),
-      contact: form.get("contact"),
       alt_contact: form.get("alt_contact"),
-      telephone: form.get("telephone"),
+      telephone: primaryTelephone,
       email: form.get("email"),
       gst_no: form.get("gst_no"),
 
@@ -3578,6 +3578,7 @@ async function handleLeadFormSubmit(event) {
   const renewalCreator =
     !isEditMode && salesTypeValue === "renewal" ? renewalLeadAttribution : null;
   const currentUserId = hydrateCurrentUserIdentity();
+  const primaryTelephone = form.get("contact") || form.get("telephone") || "";
   const selectedEmployee = getSelectedEmployeeMeta("lead_assign_emp");
   const shouldNotifyWhatsApp =
     !isEditMode && Boolean(selectedEmployee.name);
@@ -3587,9 +3588,8 @@ async function handleLeadFormSubmit(event) {
   const data = {
     company: form.get("company"),
     client: form.get("client"),
-    contact: form.get("contact"),
     alt_contact: form.get("alt_contact"),
-    telephone: form.get("telephone"),
+    telephone: primaryTelephone,
     email: form.get("email"),
     gst_no: form.get("gst_no"),
     flat_no: form.get("flat_no"),

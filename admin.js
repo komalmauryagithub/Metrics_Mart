@@ -4587,13 +4587,13 @@ async function handleAdminLeadFormSubmit(event) {
     const mapsLink = document.getElementById("adminLeadMapsLink")?.value || "";
     const locationValue = formData.get("location") || mapsLink || "";
     const currentUserId = hydrateCurrentUserIdentity();
+    const primaryTelephone = formData.get("contact") || formData.get("telephone") || "";
 
     const data = {
         company: formData.get("company"),
         client: formData.get("client"),
-        contact: formData.get("contact"),
         alt_contact: formData.get("alt_contact"),
-        telephone: formData.get("telephone"),
+        telephone: primaryTelephone,
         email: formData.get("email"),
         gst_no: formData.get("gst_no"),
         flat_no: formData.get("flat_no"),
