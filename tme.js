@@ -47,6 +47,31 @@ const BASE_URL =
       ? "http://localhost:3000"
       : window.location.origin;
 
+function normalizeCurrentUserId(user = {}) {
+  const candidates = [
+    user.id,
+    user.user_id,
+    user.userId,
+    user.employee_id,
+    user.employeeId,
+  ];
+
+  for (const candidate of candidates) {
+    const id = Number(candidate);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+
+  return 0;
+}
+
+function hydrateCurrentUserIdentity() {
+  if (!currentUser) return 0;
+  const userId = normalizeCurrentUserId(currentUser);
+  if (userId) currentUser.id = userId;
+  if (!currentUser.role) currentUser.role = "tme";
+  return userId;
+}
+
 function getEmptyTrackerCounts() {
   return {
     total: 0,
@@ -1870,6 +1895,8 @@ function loadUserFromLocalStorage() {
   }
 
   currentUser = JSON.parse(userStr);
+  hydrateCurrentUserIdentity();
+  localStorage.setItem("currentUser", JSON.stringify(currentUser));
 
   document.getElementById("userName").textContent =
     currentUser.name || "TME User";
@@ -3180,6 +3207,7 @@ document
     const salesTypeValue = form.get("sales_type") || "new";
     const renewalCreator =
       !isEditMode && salesTypeValue === "renewal" ? renewalLeadAttribution : null;
+    const currentUserId = hydrateCurrentUserIdentity();
     const selectedEmployee = getSelectedEmployeeMeta("lead_assign_emp");
     const shouldNotifyWhatsApp =
       !isEditMode && Boolean(selectedEmployee.name);
@@ -3232,7 +3260,8 @@ document
       reason: form.get("reason"),
 
       additional_notes: form.get("additional_notes"),
-      created_by: renewalCreator?.createdBy || currentUser.id,
+      created_by: renewalCreator?.createdBy || currentUserId || null,
+      user_id: renewalCreator?.createdBy || currentUserId || null,
       created_by_name: renewalCreator?.createdByName || currentUser.name || "",
       notify_whatsapp: shouldNotifyWhatsApp,
     };
@@ -3548,6 +3577,7 @@ async function handleLeadFormSubmit(event) {
   const salesTypeValue = form.get("sales_type") || "new";
   const renewalCreator =
     !isEditMode && salesTypeValue === "renewal" ? renewalLeadAttribution : null;
+  const currentUserId = hydrateCurrentUserIdentity();
   const selectedEmployee = getSelectedEmployeeMeta("lead_assign_emp");
   const shouldNotifyWhatsApp =
     !isEditMode && Boolean(selectedEmployee.name);
@@ -3592,7 +3622,8 @@ async function handleLeadFormSubmit(event) {
     follow_time: form.get("follow_time"),
     reason: form.get("reason"),
     additional_notes: form.get("additional_notes"),
-    created_by: renewalCreator?.createdBy || currentUser.id,
+    created_by: renewalCreator?.createdBy || currentUserId || null,
+    user_id: renewalCreator?.createdBy || currentUserId || null,
     created_by_name: renewalCreator?.createdByName || currentUser.name || "",
     notify_whatsapp: shouldNotifyWhatsApp,
   };

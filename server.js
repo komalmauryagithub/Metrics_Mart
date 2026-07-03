@@ -445,6 +445,38 @@ function normalizePositiveId(value) {
   return Number.isFinite(id) && id > 0 ? id : 0;
 }
 
+function resolveLeadRequestUserId(req, source = {}) {
+  const body = req?.body || {};
+  const query = req?.query || {};
+  const candidates = [
+    req?.user?.id,
+    req?.user?.user_id,
+    req?.user?.userId,
+    req?.session?.user?.id,
+    req?.session?.user?.user_id,
+    req?.session?.user?.userId,
+    body.created_by,
+    body.createdBy,
+    body.user_id,
+    body.userId,
+    source.created_by,
+    source.createdBy,
+    source.user_id,
+    source.userId,
+    query.userId,
+    query.user_id,
+    query.created_by,
+    query.createdBy,
+  ];
+
+  for (const candidate of candidates) {
+    const userId = normalizePositiveId(candidate);
+    if (userId) return userId;
+  }
+
+  return 0;
+}
+
 async function getDealOwnerScope(userId) {
   const normalizedUserId = normalizePositiveId(userId);
 
@@ -9043,6 +9075,9 @@ app.get("/api/me/:id", async (req, res) => {
 // ====================== ADD LEAD ======================
 app.post("/api/leads", async (req, res) => {
   const data = req.body || {};
+  const createdBy = resolveLeadRequestUserId(req, data);
+  data.created_by = createdBy || null;
+  data.user_id = createdBy || null;
   const salesType = normalizeLeadSalesType(data.sales_type);
   const renewalSourceLeadId =
     salesType === "renewal"
@@ -9114,7 +9149,7 @@ app.post("/api/leads", async (req, res) => {
     data.follow_time || null,
     data.reason || null,
     data.additional_notes || null,
-    data.created_by || null,
+    createdBy || null,
     companyScope,
   ];
 
@@ -9143,7 +9178,8 @@ app.post("/api/leads", async (req, res) => {
 
 // ====================== GET ALL LEADS ======================
 app.get("/api/leads", (req, res) => {
-  let { userId, role } = req.query;
+  let { role } = req.query;
+  const userId = resolveLeadRequestUserId(req, req.query);
   const scope = String(req.query.scope || "")
     .toLowerCase()
     .trim();
