@@ -2124,7 +2124,7 @@ function renderAdminAttendanceLocationRequestActions(row) {
         return `
             <div class="attendance-request-actions-readonly">
                 ${normalizedStatus === "approved"
-                    ? `Approved radius: ${Number(row.approvedRadiusMeters || row.requestedRadiusMeters || 150)}m`
+                    ? `Approved radius: ${Number(row.approvedRadiusMeters || row.requestedRadiusMeters || 50000)}m`
                     : "No further action pending"}
             </div>
         `;
@@ -2132,17 +2132,18 @@ function renderAdminAttendanceLocationRequestActions(row) {
 
     const radiusInputId = `adminAttendanceRequestRadius-${row.id}`;
     const remarkInputId = `adminAttendanceRequestRemark-${row.id}`;
-    const defaultRadius = Number(row.approvedRadiusMeters || row.requestedRadiusMeters || 150);
+    const defaultRadius = Number(row.approvedRadiusMeters || row.requestedRadiusMeters || 50000);
 
     return `
         <div class="attendance-request-actions">
             <input
                 type="number"
                 id="${radiusInputId}"
-                min="50"
-                max="300"
+                min="1000"
+                max="50000"
+                step="1000"
                 value="${defaultRadius}"
-                placeholder="Approved radius (m)"
+                placeholder="Approved pincode radius (m)"
             />
             <textarea
                 id="${remarkInputId}"

@@ -6113,10 +6113,10 @@ const ATTENDANCE_GPS_ACCURACY_BUFFER_METERS = Number(
   process.env.ATTENDANCE_GPS_ACCURACY_BUFFER_METERS || 100,
 );
 const ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS = Number(
-  process.env.ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS || 150,
+  process.env.ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS || 50000,
 );
 const ATTENDANCE_OFFSITE_MAX_RADIUS_METERS = Number(
-  process.env.ATTENDANCE_OFFSITE_MAX_RADIUS_METERS || 300,
+  process.env.ATTENDANCE_OFFSITE_MAX_RADIUS_METERS || 50000,
 );
 
 function normalizeAttendanceRole(role) {
@@ -6287,7 +6287,15 @@ function normalizeAttendanceRadiusMeters(
     ? numericValue
     : Math.round(Number(fallback) || ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS);
 
-  return Math.max(30, Math.min(ATTENDANCE_OFFSITE_MAX_RADIUS_METERS, baseValue));
+  const minimumRadius = Math.min(
+    ATTENDANCE_OFFSITE_DEFAULT_RADIUS_METERS,
+    ATTENDANCE_OFFSITE_MAX_RADIUS_METERS,
+  );
+
+  return Math.max(
+    minimumRadius,
+    Math.min(ATTENDANCE_OFFSITE_MAX_RADIUS_METERS, baseValue),
+  );
 }
 
 function getAttendanceDateKey(dateValue = new Date()) {
