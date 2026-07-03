@@ -9175,7 +9175,7 @@ app.get("/api/leads", (req, res) => {
 
   // 🔥 normalize role
   role = role ? role.toLowerCase().trim() : "";
-  if (role === "admin" || role === "tme") {
+  if (role === "admin" || role === "tme" || role === "me") {
     leadScopeSql = "";
   }
 
@@ -11401,6 +11401,23 @@ app.get("/api/attendance/location-request/:userId", async (req, res) => {
     });
   } catch (err) {
     console.error("Attendance location request context error:", err);
+    if (
+      err.code === "ER_BAD_FIELD_ERROR" &&
+      /attendance_date/i.test(String(err.sqlMessage || err.message || ""))
+    ) {
+      const officeZone = getAttendanceOfficeZone();
+      return res.json({
+        success: true,
+        data: {
+          officeZone,
+          activeRequest: null,
+          activeZone: officeZone,
+          approvedZone: null,
+          attendanceDate,
+        },
+      });
+    }
+
     res.status(err.statusCode || 500).json({
       success: false,
       message: err.message || "Failed to fetch offsite attendance request",
@@ -16115,18 +16132,19 @@ app.get("/api/project-tracker", async (req, res) => {
       message: "Valid userId is required for this tracker scope",
     });
   }
+  const useLegacyLeadScope = ["admin", "me", "tme"].includes(scope);
 
   try {
     await ensureProjectAssignmentWorkflowColumns();
     await ensureProjectPhaseDetailsTable();
-    if (scope !== "admin") {
+    if (!useLegacyLeadScope) {
       await ensureLeadCompanyScopeColumn();
     }
 
     const payload = await fetchProjectTrackerData(
       scope,
       userId,
-      scope === "admin" ? "" : getRequestedCompanyScope(req),
+      useLegacyLeadScope ? "" : getRequestedCompanyScope(req),
     );
     res.json({
       success: true,
@@ -17705,12 +17723,13 @@ app.post("/api/generate-proposal", async (req, res) => {
 
 app.get("/api/proposals", async (req, res) => {
   try {
-    await ensureProposalTables();
+    try {
+      await ensureProposalTables();
+    } catch (schemaErr) {
+      console.warn("Proposal list schema setup skipped:", schemaErr.message);
+    }
+
     const createdBy = Number(req.query?.created_by || 0);
-    const proposalScopeSql = getCompanyProposalScopeSql(
-      getRequestedCompanyScope(req),
-      "p",
-    );
     const params = [];
     const whereParts = [];
 
@@ -17719,23 +17738,38 @@ app.get("/api/proposals", async (req, res) => {
       params.push(createdBy);
     }
 
-    if (proposalScopeSql) {
-      whereParts.push(proposalScopeSql);
-    }
-
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
 
-    const [rows] = await dbPromise.query(
-      `
-        SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, p.company_scope, p.status, p.created_at, p.updated_at,
-               u.name AS created_by_name, u.comp_name AS created_by_company
-        FROM proposals p
-        LEFT JOIN users u ON u.id = p.created_by
-        ${whereSql}
-        ORDER BY p.created_at DESC, p.id DESC
-      `,
-      params,
-    );
+    let rows = [];
+    try {
+      [rows] = await dbPromise.query(
+        `
+          SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, NULL AS company_scope, p.status, p.created_at, p.updated_at,
+                 u.name AS created_by_name, u.comp_name AS created_by_company
+          FROM proposals p
+          LEFT JOIN users u ON u.id = p.created_by
+          ${whereSql}
+          ORDER BY p.created_at DESC, p.id DESC
+        `,
+        params,
+      );
+    } catch (listErr) {
+      if (listErr.code !== "ER_BAD_FIELD_ERROR") {
+        throw listErr;
+      }
+
+      [rows] = await dbPromise.query(
+        `
+          SELECT p.id, p.client_name, NULL AS client_email, p.company_name, p.project_topic, NULL AS company_scope, p.status, p.created_at, p.updated_at,
+                 u.name AS created_by_name, u.comp_name AS created_by_company
+          FROM proposals p
+          LEFT JOIN users u ON u.id = p.created_by
+          ${whereSql}
+          ORDER BY p.created_at DESC, p.id DESC
+        `,
+        params,
+      );
+    }
 
     return res.json({ success: true, data: rows });
   } catch (error) {
