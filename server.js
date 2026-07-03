@@ -9078,7 +9078,6 @@ app.post("/api/leads", async (req, res) => {
   const createdBy = resolveLeadRequestUserId(req, data);
   data.created_by = createdBy || null;
   data.user_id = createdBy || null;
-  const primaryTelephone = data.telephone || data.contact || null;
   const salesType = normalizeLeadSalesType(data.sales_type);
   const renewalSourceLeadId =
     salesType === "renewal"
@@ -9098,7 +9097,7 @@ app.post("/api/leads", async (req, res) => {
 
   const sql = `
       INSERT INTO leads (
-        company_name, client_name, alternate_contact,
+        company_name, client_name, contact, alternate_contact,
         telephone, email, gst_no,
         flat_no, building_name, locality, city, pincode, state, maps_lnk,
         source_lead, sales_type, renewal_source_lead_id, industry_type,
@@ -9110,14 +9109,15 @@ app.post("/api/leads", async (req, res) => {
         additional_notes,
         created_by,
         company_scope
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
   const values = [
     normalizeRequiredLeadText(data.company),
     normalizeRequiredLeadText(data.client),
+    normalizeRequiredLeadText(data.contact),
     data.alt_contact || null,
-    primaryTelephone,
+    data.telephone || null,
     data.email || null,
     data.gst_no || null,
     data.flat_no || null,
@@ -9335,12 +9335,12 @@ app.put("/api/leads/:id", async (req, res) => {
       const followTime = isFollowup ? data.follow_time || null : null;
       const followReason = isFollowup ? data.reason || null : null;
       const locationValue = data.location || data.maps_lnk || null;
-      const primaryTelephone = data.telephone || data.contact || null;
 
       const sql = `
         UPDATE leads
         SET company_name = ?,
             client_name = ?,
+            contact = ?,
             alternate_contact = ?,
             telephone = ?,
             email = ?,
@@ -9380,8 +9380,9 @@ app.put("/api/leads/:id", async (req, res) => {
       const values = [
         data.company || null,
         data.client || null,
+        data.contact || null,
         data.alt_contact || null,
-        primaryTelephone,
+        data.telephone || null,
         data.email || null,
         data.gst_no || null,
         data.flat_no || null,
