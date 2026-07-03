@@ -50,6 +50,17 @@ const PROPOSAL_LETTERHEAD_FOOTER_URL = `${BASE_URL}/letterhead-footer.jpeg`;
 const PROPOSAL_REDSEA_LETTERHEAD_HEADER_URL = `${BASE_URL}/redsea-letterhead-header.jpeg`;
 const PROPOSAL_REDSEA_LETTERHEAD_FOOTER_URL = `${BASE_URL}/redsea-letterhead-footer.jpeg`;
 
+function getCurrentUserId() {
+  return Number(
+    currentUser?.id ||
+      currentUser?.userId ||
+      currentUser?.user_id ||
+      currentUser?.employeeId ||
+      currentUser?.employee_id ||
+      0,
+  );
+}
+
 async function fetchProposalRequest(url, options = {}, routeLabel = "Proposal API") {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), PROPOSAL_REQUEST_TIMEOUT_MS);
@@ -185,6 +196,10 @@ function loadUser() {
   }
 
   currentUser = JSON.parse(user);
+  const normalizedUserId = getCurrentUserId();
+  if (normalizedUserId) {
+    currentUser.id = normalizedUserId;
+  }
 
   document.getElementById("userName").textContent = currentUser.name;
 
@@ -3286,13 +3301,15 @@ async function fetchAttendance() {
 async function submitAttendanceLocationRequest(event) {
   event.preventDefault();
 
-  if (!currentUser?.id || attendanceLocationRequestSubmitting) return;
+  const userId = getCurrentUserId();
+  if (!userId || attendanceLocationRequestSubmitting) return;
 
   const form = event.currentTarget;
   const submitBtn = document.getElementById("attendanceLocationRequestSubmitBtn");
   const formData = new FormData(form);
   const payload = {
-    userId: currentUser.id,
+    userId,
+    user_id: userId,
     locationLabel: formData.get("locationLabel"),
     meetingWith: formData.get("meetingWith"),
     purpose: formData.get("purpose"),
@@ -3334,7 +3351,11 @@ async function submitAttendanceLocationRequest(event) {
 }
 
 async function markAttendance(type) {
-  if (!currentUser || !currentUser.id) return;
+  const userId = getCurrentUserId();
+  if (!userId) {
+    showPopup("Attendance", "User ID missing. Please login again.", false);
+    return;
+  }
   if (attendanceUpdating) return;
 
   const url =
@@ -3356,7 +3377,7 @@ async function markAttendance(type) {
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: currentUser.id, ...location, ...facePayload }),
+      body: JSON.stringify({ userId, user_id: userId, ...location, ...facePayload }),
     });
     const result = await res.json();
 

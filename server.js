@@ -4108,6 +4108,42 @@ async function getSchemaColumnInfo(tableName, columnName, connection = dbPromise
   return rows[0] || null;
 }
 
+function quoteDbIdentifier(identifier) {
+  return `\`${String(identifier || "").replace(/`/g, "``")}\``;
+}
+
+async function getFirstExistingColumn(tableName, candidates = []) {
+  for (const candidate of candidates) {
+    if (await schemaColumnExists(tableName, candidate)) {
+      return candidate;
+    }
+  }
+
+  return "";
+}
+
+async function getAttendanceTableDateColumn() {
+  return (
+    (await getFirstExistingColumn("attendance", [
+      "attendance_date",
+      "date",
+      "attendanceDate",
+      "attendance_day",
+    ])) || "attendance_date"
+  );
+}
+
+async function getAttendanceLocationRequestDateColumn() {
+  return (
+    (await getFirstExistingColumn("attendance_location_requests", [
+      "attendance_date",
+      "date",
+      "attendanceDate",
+      "request_date",
+    ])) || "attendance_date"
+  );
+}
+
 async function runSchemaChange(sql, duplicateCode) {
   const tableName = getAlterTableName(sql);
   const addColumnName = getAddColumnName(sql);
@@ -4905,10 +4941,11 @@ async function ensureAttendanceTable() {
     await runSchemaChange(`ALTER TABLE attendance ${columnSql}`, "ER_DUP_FIELDNAME");
   }
 
+  const attendanceDateColumn = quoteDbIdentifier(await getAttendanceTableDateColumn());
   await dbPromise.query(`
     UPDATE attendance
-    SET attendance_date = COALESCE(attendance_date, DATE(check_in), CURDATE())
-    WHERE attendance_date IS NULL
+    SET ${attendanceDateColumn} = COALESCE(${attendanceDateColumn}, DATE(check_in), CURDATE())
+    WHERE ${attendanceDateColumn} IS NULL
   `);
 
   const statusColumn = await getSchemaColumnInfo("attendance", "status");
@@ -4974,6 +5011,7 @@ async function ensureAttendanceLocationRequestsTable() {
   await dbPromise.query(sql);
 
   const columns = [
+    "ADD COLUMN attendance_date date DEFAULT NULL AFTER user_id",
     "ADD COLUMN requested_accuracy decimal(8,2) DEFAULT NULL AFTER requested_lng",
     "ADD COLUMN requested_location_url varchar(500) DEFAULT NULL AFTER requested_accuracy",
     "ADD COLUMN requested_address varchar(255) DEFAULT NULL AFTER requested_location_url",
@@ -4995,6 +5033,15 @@ async function ensureAttendanceLocationRequestsTable() {
       "ER_DUP_FIELDNAME",
     );
   }
+
+  const requestDateColumn = quoteDbIdentifier(
+    await getAttendanceLocationRequestDateColumn(),
+  );
+  await dbPromise.query(`
+    UPDATE attendance_location_requests
+    SET ${requestDateColumn} = COALESCE(${requestDateColumn}, DATE(created_at), CURDATE())
+    WHERE ${requestDateColumn} IS NULL
+  `);
 
   const statusColumn = await getSchemaColumnInfo("attendance_location_requests", "status");
   if (
@@ -6348,12 +6395,15 @@ async function getLatestAttendanceLocationRequest(userId, attendanceDate = getAt
   if (!normalizedUserId || !normalizedDate) return null;
 
   await ensureAttendanceLocationRequestsTable();
+  const requestDateColumn = quoteDbIdentifier(
+    await getAttendanceLocationRequestDateColumn(),
+  );
   const [rows] = await dbPromise.query(
     `
       SELECT
         id,
         user_id,
-        DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date,
+        DATE_FORMAT(${requestDateColumn}, '%Y-%m-%d') AS attendance_date,
         purpose,
         meeting_with,
         notes,
@@ -6376,7 +6426,7 @@ async function getLatestAttendanceLocationRequest(userId, attendanceDate = getAt
         DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
       FROM attendance_location_requests
-      WHERE user_id = ? AND attendance_date = ?
+      WHERE user_id = ? AND ${requestDateColumn} = ?
       ORDER BY id DESC
       LIMIT 1
     `,
@@ -6703,18 +6753,19 @@ async function finalizeAttendanceCheckout({
   await ensureUserShiftColumns();
 
   const attendanceTodayKey = getAttendanceDateKey();
+  const attendanceDateColumn = quoteDbIdentifier(await getAttendanceTableDateColumn());
   const targetSql = scope === "latest_open"
     ? `
-      SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date
+      SELECT DATE_FORMAT(${attendanceDateColumn}, '%Y-%m-%d') AS attendance_date
       FROM attendance
       WHERE user_id = ? AND check_in IS NOT NULL AND check_out IS NULL
-      ORDER BY attendance_date DESC, check_in DESC
+      ORDER BY ${attendanceDateColumn} DESC, check_in DESC
       LIMIT 1
     `
     : `
-      SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date
+      SELECT DATE_FORMAT(${attendanceDateColumn}, '%Y-%m-%d') AS attendance_date
       FROM attendance
-      WHERE user_id = ? AND attendance_date = ? AND check_in IS NOT NULL
+      WHERE user_id = ? AND ${attendanceDateColumn} = ? AND check_in IS NOT NULL
       LIMIT 1
     `;
 
@@ -6741,7 +6792,7 @@ async function finalizeAttendanceCheckout({
     `
       UPDATE attendance
       SET check_out = ?
-      WHERE user_id = ? AND attendance_date = ? AND check_in IS NOT NULL AND check_out IS NULL
+      WHERE user_id = ? AND ${attendanceDateColumn} = ? AND check_in IS NOT NULL AND check_out IS NULL
     `,
     [checkoutValue, normalizedUserId, attendanceDate],
   );
@@ -6766,10 +6817,10 @@ async function finalizeAttendanceCheckout({
         ${attendanceStatusSql} AS status,
         TIME_FORMAT(${shiftEndSql}, '%H:%i') AS logout_time,
         DATE_FORMAT(a.check_out, '%H:%i:%s') AS check_out,
-        DATE_FORMAT(a.attendance_date, '%Y-%m-%d') AS attendance_date
+        DATE_FORMAT(a.${attendanceDateColumn}, '%Y-%m-%d') AS attendance_date
       FROM attendance a
       LEFT JOIN users u ON u.id = a.user_id
-      WHERE a.user_id = ? AND a.attendance_date = ?
+      WHERE a.user_id = ? AND a.${attendanceDateColumn} = ?
       LIMIT 1
     `,
     [normalizedUserId, attendanceDate],
@@ -10902,11 +10953,12 @@ app.post("/api/attendance/check-in", async (req, res) => {
       : isGrace
         ? "grace"
         : "present";
+    const attendanceDateColumn = quoteDbIdentifier(await getAttendanceTableDateColumn());
 
     const sql = `
       INSERT INTO attendance (
         user_id,
-        attendance_date,
+        ${attendanceDateColumn},
         check_in,
         check_in_lat,
         check_in_lng,
@@ -11428,7 +11480,7 @@ app.get("/api/attendance/location-request/:userId", async (req, res) => {
 });
 
 app.post("/api/attendance/location-request", async (req, res) => {
-  const userId = Number(req.body.userId);
+  const userId = Number(req.body.userId || req.body.user_id || req.body.created_by);
   const lat = Number(req.body.lat);
   const lng = Number(req.body.lng);
   const accuracyMeters = Number(req.body.accuracy);
@@ -11523,11 +11575,14 @@ app.post("/api/attendance/location-request", async (req, res) => {
         ],
       );
     } else {
+      const requestDateColumn = quoteDbIdentifier(
+        await getAttendanceLocationRequestDateColumn(),
+      );
       await dbPromise.query(
         `
           INSERT INTO attendance_location_requests (
             user_id,
-            attendance_date,
+            ${requestDateColumn},
             purpose,
             meeting_with,
             notes,
