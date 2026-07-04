@@ -838,8 +838,12 @@
 
       const rows = proposals
         .map((item) => {
+          const proposalId = Number(item.id || item.proposal_id || 0);
+          const hasProposalId = Number.isFinite(proposalId) && proposalId > 0;
           const status = String(item.status || "draft").toLowerCase();
           const statusClass = status.replace(/[^a-z0-9_-]+/g, "-");
+          const disabledAttr = hasProposalId ? "" : "disabled";
+          const disabledTitle = hasProposalId ? "" : "Proposal id missing";
 
           return `
             <tr>
@@ -851,11 +855,11 @@
               <td>${escapeHtml(formatDateTime(item.created_at))}</td>
               <td>
                 <div class="admin-proposal-table-actions">
-                  <button type="button" class="tab-btn active" onclick="AdminProposals.open(${Number(item.id)})" title="Open proposal"><i class="fas fa-pen"></i></button>
-                  <button type="button" class="btn btn-proposal-png" onclick="AdminProposals.download('png', ${Number(item.id)})" title="Download PNG"><i class="fas fa-file-image"></i></button>
-                  <button type="button" class="btn btn-proposal-pdf" onclick="AdminProposals.download('pdf', ${Number(item.id)})" title="Download PDF"><i class="fas fa-file-pdf"></i></button>
-                  <button type="button" class="btn btn-whatsapp" onclick="AdminProposals.shareWhatsApp(${Number(item.id)})" title="Share WhatsApp"><i class="fab fa-whatsapp"></i></button>
-                  <button type="button" class="btn btn-gmail" onclick="AdminProposals.sendEmail(${Number(item.id)})" title="Email PDF"><i class="fas fa-envelope"></i></button>
+                  <button type="button" class="tab-btn active" ${disabledAttr} onclick="${hasProposalId ? `AdminProposals.open(${proposalId})` : ""}" title="${disabledTitle || "Open proposal"}"><i class="fas fa-pen"></i></button>
+                  <button type="button" class="btn btn-proposal-png" ${disabledAttr} onclick="${hasProposalId ? `AdminProposals.download('png', ${proposalId})` : ""}" title="${disabledTitle || "Download PNG"}"><i class="fas fa-file-image"></i></button>
+                  <button type="button" class="btn btn-proposal-pdf" ${disabledAttr} onclick="${hasProposalId ? `AdminProposals.download('pdf', ${proposalId})` : ""}" title="${disabledTitle || "Download PDF"}"><i class="fas fa-file-pdf"></i></button>
+                  <button type="button" class="btn btn-whatsapp" ${disabledAttr} onclick="${hasProposalId ? `AdminProposals.shareWhatsApp(${proposalId})` : ""}" title="${disabledTitle || "Share WhatsApp"}"><i class="fab fa-whatsapp"></i></button>
+                  <button type="button" class="btn btn-gmail" ${disabledAttr} onclick="${hasProposalId ? `AdminProposals.sendEmail(${proposalId})` : ""}" title="${disabledTitle || "Email PDF"}"><i class="fas fa-envelope"></i></button>
                 </div>
               </td>
             </tr>
@@ -888,9 +892,15 @@
   }
 
   async function open(proposalId) {
+    const id = Number(proposalId || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      notify("Error", "Proposal id missing. Please refresh proposals list.", false);
+      return;
+    }
+
     try {
       const res = await fetchProposalRequest(
-        withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${proposalId}`),
+        withCompanyScope(`${ADMIN_PROPOSAL_BASE_URL}/api/proposals/${id}`),
         { cache: "no-store" },
         "Open proposal API",
       );

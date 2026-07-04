@@ -17560,17 +17560,69 @@ app.post("/api/invoices/send-email", async (req, res) => {
 });
 
 async function getProposalById(proposalId, companyScope = "") {
-  await ensureProposalTables();
-  const proposalScopeSql = getCompanyProposalScopeSql(companyScope, "p");
-  const params = [proposalId];
+  try {
+    await ensureProposalTables();
+  } catch (schemaErr) {
+    console.warn("Proposal fetch schema setup skipped:", schemaErr.message);
+  }
+
+  const numericProposalId = Number(proposalId);
+  if (!Number.isFinite(numericProposalId) || numericProposalId <= 0) {
+    return null;
+  }
+
+  const idColumn = await getFirstExistingColumn("proposals", ["id", "proposal_id"]);
+  if (!idColumn) {
+    return null;
+  }
+  const hasCreatedByColumn = await schemaColumnExists("proposals", "created_by");
+  const hasCompanyScopeColumn = await schemaColumnExists("proposals", "company_scope");
+  const hasUserNameColumn = await schemaColumnExists("users", "name");
+  const hasUserCompanyColumn = await schemaColumnExists("users", "comp_name");
+  const normalizedScope = normalizeLoginCompanyKey(companyScope);
+  const whereParts = [`p.${quoteDbIdentifier(idColumn)} = ?`];
+  const params = [numericProposalId];
+
+  if (hasCompanyScopeColumn && normalizedScope) {
+    const scopeValues =
+      normalizedScope === "redsea"
+        ? ["redsea", "redseainfolinepvtltd"]
+        : normalizedScope === "metrics"
+          ? ["metrics", "metricsmart", "metricsmartinfolinepvtltd"]
+          : [normalizedScope];
+    const scopePlaceholders = scopeValues.map(() => "?").join(", ");
+    whereParts.push(`
+      (
+        LOWER(REPLACE(TRIM(COALESCE(p.company_scope, '')), ' ', '')) IN (${scopePlaceholders})
+        OR TRIM(COALESCE(p.company_scope, '')) = ''
+      )
+    `);
+    params.push(...scopeValues);
+  }
+
+  const userJoinSql =
+    hasCreatedByColumn && hasUserNameColumn
+      ? "LEFT JOIN users u ON u.id = p.created_by"
+      : "";
+  const createdByNameSql =
+    hasCreatedByColumn && hasUserNameColumn
+      ? "u.name AS created_by_name"
+      : "NULL AS created_by_name";
+  const createdByCompanySql =
+    hasCreatedByColumn && hasUserNameColumn && hasUserCompanyColumn
+      ? "u.comp_name AS created_by_company"
+      : "NULL AS created_by_company";
 
   const [rows] = await dbPromise.query(
     `
-      SELECT p.*, u.name AS created_by_name, u.comp_name AS created_by_company
+      SELECT
+        p.*,
+        p.${quoteDbIdentifier(idColumn)} AS id,
+        ${createdByNameSql},
+        ${createdByCompanySql}
       FROM proposals p
-      LEFT JOIN users u ON u.id = p.created_by
-      WHERE p.id = ?
-      ${proposalScopeSql ? `AND ${proposalScopeSql}` : ""}
+      ${userJoinSql}
+      WHERE ${whereParts.join(" AND ")}
       LIMIT 1
     `,
     params,
@@ -17799,6 +17851,7 @@ app.get("/api/proposals", async (req, res) => {
     const whereParts = [];
     const columnNames = [
       "id",
+      "proposal_id",
       "client_name",
       "client_email",
       "company_name",
@@ -17820,6 +17873,16 @@ app.get("/api/proposals", async (req, res) => {
       existingColumns.has(columnName)
         ? `p.${quoteDbIdentifier(columnName)} AS ${quoteDbIdentifier(alias)}`
         : `${fallback} AS ${quoteDbIdentifier(alias)}`;
+    const selectProposalId = () => {
+      if (existingColumns.has("id")) return "p.id AS id";
+      if (existingColumns.has("proposal_id")) return "p.proposal_id AS id";
+      return "0 AS id";
+    };
+    const selectProposalRawId = () => {
+      if (existingColumns.has("proposal_id")) return "p.proposal_id AS proposal_id";
+      if (existingColumns.has("id")) return "p.id AS proposal_id";
+      return "NULL AS proposal_id";
+    };
 
     if (createdBy && existingColumns.has("created_by")) {
       whereParts.push("p.created_by = ?");
@@ -17833,10 +17896,12 @@ app.get("/api/proposals", async (req, res) => {
     const orderSql = [
       existingColumns.has("created_at") ? "p.created_at DESC" : "",
       existingColumns.has("id") ? "p.id DESC" : "",
+      !existingColumns.has("id") && existingColumns.has("proposal_id") ? "p.proposal_id DESC" : "",
     ].filter(Boolean).join(", ");
     const selectSql = `
       SELECT
-        ${selectProposalColumn("id", "id", "0")},
+        ${selectProposalId()},
+        ${selectProposalRawId()},
         ${selectProposalColumn("client_name")},
         ${selectProposalColumn("client_email")},
         ${selectProposalColumn("company_name")},
