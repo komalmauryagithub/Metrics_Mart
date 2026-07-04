@@ -17797,48 +17797,71 @@ app.get("/api/proposals", async (req, res) => {
     const createdBy = Number(req.query?.created_by || 0);
     const params = [];
     const whereParts = [];
+    const columnNames = [
+      "id",
+      "client_name",
+      "client_email",
+      "company_name",
+      "project_topic",
+      "status",
+      "created_at",
+      "updated_at",
+      "created_by",
+    ];
+    const existingColumns = new Set();
 
-    if (createdBy) {
+    for (const columnName of columnNames) {
+      if (await schemaColumnExists("proposals", columnName)) {
+        existingColumns.add(columnName);
+      }
+    }
+
+    const selectProposalColumn = (columnName, alias = columnName, fallback = "NULL") =>
+      existingColumns.has(columnName)
+        ? `p.${quoteDbIdentifier(columnName)} AS ${quoteDbIdentifier(alias)}`
+        : `${fallback} AS ${quoteDbIdentifier(alias)}`;
+
+    if (createdBy && existingColumns.has("created_by")) {
       whereParts.push("p.created_by = ?");
       params.push(createdBy);
     }
 
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const userJoinSql = existingColumns.has("created_by")
+      ? "LEFT JOIN users u ON u.id = p.created_by"
+      : "";
+    const orderSql = [
+      existingColumns.has("created_at") ? "p.created_at DESC" : "",
+      existingColumns.has("id") ? "p.id DESC" : "",
+    ].filter(Boolean).join(", ");
+    const selectSql = `
+      SELECT
+        ${selectProposalColumn("id", "id", "0")},
+        ${selectProposalColumn("client_name")},
+        ${selectProposalColumn("client_email")},
+        ${selectProposalColumn("company_name")},
+        ${selectProposalColumn("project_topic")},
+        NULL AS company_scope,
+        ${selectProposalColumn("status", "status", "'draft'")},
+        ${selectProposalColumn("created_at")},
+        ${selectProposalColumn("updated_at")},
+        ${existingColumns.has("created_by") ? "u.name" : "NULL"} AS created_by_name,
+        ${existingColumns.has("created_by") ? "u.comp_name" : "NULL"} AS created_by_company
+      FROM proposals p
+      ${userJoinSql}
+      ${whereSql}
+      ${orderSql ? `ORDER BY ${orderSql}` : ""}
+    `;
 
-    let rows = [];
-    try {
-      [rows] = await dbPromise.query(
-        `
-          SELECT p.id, p.client_name, p.client_email, p.company_name, p.project_topic, NULL AS company_scope, p.status, p.created_at, p.updated_at,
-                 u.name AS created_by_name, u.comp_name AS created_by_company
-          FROM proposals p
-          LEFT JOIN users u ON u.id = p.created_by
-          ${whereSql}
-          ORDER BY p.created_at DESC, p.id DESC
-        `,
-        params,
-      );
-    } catch (listErr) {
-      if (listErr.code !== "ER_BAD_FIELD_ERROR") {
-        throw listErr;
-      }
-
-      [rows] = await dbPromise.query(
-        `
-          SELECT p.id, p.client_name, NULL AS client_email, p.company_name, p.project_topic, NULL AS company_scope, p.status, p.created_at, p.updated_at,
-                 u.name AS created_by_name, u.comp_name AS created_by_company
-          FROM proposals p
-          LEFT JOIN users u ON u.id = p.created_by
-          ${whereSql}
-          ORDER BY p.created_at DESC, p.id DESC
-        `,
-        params,
-      );
-    }
+    const [rows] = await dbPromise.query(selectSql, params);
 
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Proposal list error:", error);
+    if (["ER_BAD_FIELD_ERROR", "ER_NO_SUCH_TABLE"].includes(error.code)) {
+      return res.json({ success: true, data: [] });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to load proposals",
